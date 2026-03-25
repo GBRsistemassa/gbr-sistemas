@@ -6,11 +6,11 @@
   <meta name="theme-color" content="#07080f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Clean Car">
+  <meta name="apple-mobile-web-app-title" content="GBR Sistemas">
   <meta name="mobile-web-app-capable" content="yes">
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2307080f'/><text y='.9em' font-size='80'>🚗</text></svg>">
-  <link rel="manifest" href="data:application/json,%7B%22name%22%3A%22Clean+Car%22%2C%22short_name%22%3A%22CleanCar%22%2C%22start_url%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%2307080f%22%2C%22theme_color%22%3A%22%234fc3f7%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%3Csvg+xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'+viewBox%3D'0+0+192+192'%3E%3Crect+width%3D'192'+height%3D'192'+rx%3D'40'+fill%3D'%2307080f'%2F%3E%3Ctext+y%3D'.9em'+font-size%3D'160'%3E%F0%9F%9A%97%3C%2Ftext%3E%3C%2Fsvg%3E%22%2C%22sizes%22%3A%22192x192%22%7D%5D%7D">
-<title>Clean Car — Sistema v4.0</title>
+  <link rel="manifest" href="data:application/json,%7B%22name%22%3A%22GBR+Sistemas%22%2C%22short_name%22%3A%22GBRSistemas%22%2C%22start_url%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%2307080f%22%2C%22theme_color%22%3A%22%234fc3f7%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%3Csvg+xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'+viewBox%3D'0+0+192+192'%3E%3Crect+width%3D'192'+height%3D'192'+rx%3D'40'+fill%3D'%2307080f'%2F%3E%3Ctext+y%3D'.9em'+font-size%3D'160'%3E%F0%9F%9A%97%3C%2Ftext%3E%3C%2Fsvg%3E%22%2C%22sizes%22%3A%22192x192%22%7D%5D%7D">
+<title>GBR Sistemas — Plataforma de Gestão</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 
 <!-- Toast disponível globalmente antes do module Firebase carregar -->
@@ -30,7 +30,7 @@ function toast(msg, type='ok') {
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script>
-  firebase.initializeApp({apiKey:"AIzaSyBV4M48o18LRGev4ii-EJ27PuXvyiFyAtA",authDomain:"clean-car-2bffd.firebaseapp.com",databaseURL:"https://clean-car-2bffd-default-rtdb.firebaseio.com",projectId:"clean-car-2bffd",storageBucket:"clean-car-2bffd.firebasestorage.app",messagingSenderId:"435949152194",appId:"1:435949152194:web:379b296af9864008d7185b"});
+  firebase.initializeApp({apiKey:"AIzaSyAdn8IUIWhZUhvHNAg5jEYAPwtCSaQbKA0",authDomain:"gbr-sistemas-saas.firebaseapp.com",databaseURL:"https://gbr-sistemas-saas-default-rtdb.firebaseio.com",projectId:"gbr-sistemas-saas",storageBucket:"gbr-sistemas-saas.firebasestorage.app",messagingSenderId:"329609507285",appId:"1:329609507285:web:d2c1c9ac41e6e8d8e5cd5c"});
   var _fbDB=firebase.database(),_fbAuth=firebase.auth();
   window._db=_fbDB;window._auth=_fbAuth;window._firebaseReady=false;
   window._fbRef=function(db,p){return db.ref(p);};
@@ -48,23 +48,113 @@ function toast(msg, type='ok') {
     try{await _fbAuth.signInWithEmailAndPassword(e,p);}
     catch(err){toast('E-mail ou senha incorretos','err');btn.disabled=false;btn.textContent='&#9658; Entrar';}
   };
-  _fbAuth.onAuthStateChanged(function(user){
+  _fbAuth.onAuthStateChanged(async function(user){
     if(user){
       window._currentAuthUser=user;window._firebaseReady=true;
+
+      // 1. Carregar tenant do usuário
+      var emailKey=user.email.replace(/\./g,'_').replace(/@/g,'__at__');
+      var snapTenant=await _fbDB.ref('userTenants/'+emailKey).once('value');
+      var tenantData=snapTenant.val();
+
+      if(!tenantData){
+        document.getElementById('loginScreen').style.display='none';
+        var lock=document.getElementById('lockScreen');
+        lock.style.display='flex';
+        document.getElementById('lockMsg').textContent='Este acesso é para usuários cadastrados em uma estética. Se você é o Super Admin, acesse o console GBR.';
+        return;
+      }
+
+      window._tenantId=tenantData.tenantId;
+      window._userRole=tenantData.role;
+
+      // 2. Verificar assinatura
+      var snapAss=await _fbDB.ref('tenants/'+window._tenantId+'/assinatura').once('value');
+      var ass=snapAss.val()||{};
+
+      if(ass.status==='bloqueado'){
+        document.getElementById('loginScreen').style.display='none';
+        var lock=document.getElementById('lockScreen');
+        lock.style.display='flex';
+        document.getElementById('lockMsg').textContent='Assinatura bloqueada. Plano: '+(ass.plano||'—')+'. Contato: suporte@gbrsistemas.com.br';
+        var snapCfg=await _fbDB.ref('globalConfig/style').once('value');
+        var cfg=snapCfg.val()||{};
+        if(cfg.suporte)document.getElementById('lockWhats').href=cfg.suporte;
+        return;
+      }
+
+      if(ass.status==='pendente'){
+        setTimeout(function(){toast('⚠ Atenção: sua assinatura está pendente de pagamento. Regularize para evitar bloqueio.','warn');},3000);
+      }
+
+      // 3. Verificar expiração
+      if(ass.expiracao){
+        var hoje=new Date();
+        var exp=new Date(ass.expiracao+'T23:59:59');
+        if(hoje>exp){
+          await _fbDB.ref('tenants/'+window._tenantId+'/assinatura').update({status:'bloqueado',bloqueadoEm:new Date().toISOString(),motivoBloqueio:'Assinatura expirada em '+ass.expiracao});
+          document.getElementById('loginScreen').style.display='none';
+          var lock=document.getElementById('lockScreen');
+          lock.style.display='flex';
+          document.getElementById('lockMsg').textContent='Sua assinatura expirou em '+new Date(ass.expiracao+'T12:00:00').toLocaleDateString('pt-BR')+'. Entre em contato para renovar.';
+          return;
+        }
+        var diff=Math.floor((exp-hoje)/86400000);
+        if(diff<=7){setTimeout(function(){toast('⏰ Sua assinatura expira em '+diff+' dias. Renove para não perder o acesso.','warn');},4000);}
+      }
+
+      // 4. Tudo OK — mostrar o sistema
       document.getElementById('loginScreen').style.display='none';
       var nick=user.email.split('@')[0];
       document.getElementById('userNm').textContent=nick.toUpperCase();
       document.getElementById('userAv').textContent=nick[0].toUpperCase();
       document.getElementById('userAv').style.background='rgba(79,195,247,.25)';
       document.getElementById('userAv').style.color='var(--accent)';
+
+      // 5. Carregar identidade visual do tenant
+      try {
+        var snapStyle = await _fbDB.ref('tenants/' + window._tenantId + '/config').once('value');
+        var styleCfg = snapStyle.val() || {};
+        if (styleCfg.sistNome) {
+          var logos = document.querySelectorAll('.tb-logo, .login-logo, .logo');
+          logos.forEach(function(el) {
+            el.innerHTML = styleCfg.sistNome;
+          });
+          document.title = styleCfg.sistNome + ' — Sistema de Gestão';
+        }
+        if (styleCfg.corPrimaria) {
+          document.documentElement.style.setProperty('--accent', styleCfg.corPrimaria);
+        }
+      } catch(e) {}
+
+      setTimeout(verificarNotificacoesGlobais,3000);
       window.dispatchEvent(new Event('firebaseReady'));
+
     }else{
-      window._currentAuthUser=null;window._firebaseReady=false;
+      window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;
       document.getElementById('loginScreen').style.display='flex';
       var btn=document.getElementById('btnLogin');
-      if(btn){btn.disabled=false;btn.textContent='&#9658; Entrar';}
+      if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
     }
   });
+
+  // Verifica notificações enviadas pelo Super Admin
+  async function verificarNotificacoesGlobais(){
+    try{
+      var snap=await _fbDB.ref('globalConfig/notificacoes').once('value');
+      var notifs=snap.val()||{};
+      var arr=Object.entries(notifs).sort(function(a,b){return b[0]-a[0];});
+      if(!arr.length)return;
+      var vKey='gbr_nv_'+(window._tenantId||'x');
+      var vistas=JSON.parse(localStorage.getItem(vKey)||'[]');
+      var nova=arr.find(function(n){return !vistas.includes(n[0]);});
+      if(!nova)return;
+      var n=nova[1];
+      toast('📢 GBR: '+n.titulo+' — '+n.mensagem,'info');
+      vistas.push(nova[0]);
+      localStorage.setItem(vKey,JSON.stringify(vistas.slice(-20)));
+    }catch(e){}
+  }
   window.logout=function(){
     if(!confirm('Deseja sair?'))return;
     if(typeof auditLog==='function')auditLog('logout','Sessao encerrada');
@@ -84,7 +174,7 @@ function toast(msg, type='ok') {
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
-body{background:var(--bg);color:var(--text);font-family:var(--font-b);font-size:14px;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font-family:var(--font-b);font-size:14px}
 body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(79,195,247,.06),transparent);pointer-events:none;z-index:0}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
 
@@ -366,28 +456,38 @@ body.light .badge{opacity:.9}
   .fgrid.c3{grid-template-columns:1fr 1fr}
   .pgto-grid{grid-template-columns:1fr 1fr}
   .cg4{grid-template-columns:1fr 1fr}
-  #main{padding:12px 10px 80px;max-width:100vw;overflow-x:hidden}
+  #main{padding:12px 10px 80px}
   .card{padding:12px 14px}
   .cv{font-size:22px}
-  .modal{padding:18px;max-width:98vw;width:98vw!important;box-sizing:border-box}
+  .modal{padding:18px}
   th{display:none}.tw table,.tw thead,.tw tbody,.tw tr,.tw td{display:block;width:100%}
   .tw td{padding:6px 12px;border-top:1px solid var(--border)}
   .tw td:first-child{font-weight:600;padding-top:12px}
-  .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .fsec{overflow-x:hidden}
-  .fgrid{grid-template-columns:1fr!important}
-  .admin-tabs-row,.ptab{font-size:11px;padding:6px 8px}
-  #waTabs,#adminTabs,#page-manual .ptab{flex-wrap:wrap}
-  button.ptab{flex:1 1 auto;min-width:80px}
 }
 </style>
 </head>
 <body>
 
+<!-- TELA DE BLOQUEIO GBR -->
+<div id="lockScreen" style="display:none;position:fixed;inset:0;background:#07080f;z-index:99999;align-items:center;justify-content:center;flex-direction:column;gap:16px">
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:#ff5252;letter-spacing:4px">ACESSO SUSPENSO</div>
+  <div style="color:#8b90b0;font-size:14px;text-align:center;max-width:400px" id="lockMsg">
+    Sua assinatura está bloqueada. Entre em contato com o suporte GBR Sistemas.
+  </div>
+  <a id="lockWhats" href="#" target="_blank"
+    style="background:#4fc3f7;color:#07080f;padding:12px 28px;border-radius:10px;font-weight:700;text-decoration:none;margin-top:8px">
+    💬 Falar com Suporte
+  </a>
+  <button onclick="firebase.auth().signOut().then(()=>location.reload())"
+    style="background:transparent;border:1px solid #313450;color:#8b90b0;padding:8px 20px;border-radius:8px;cursor:pointer;margin-top:4px">
+    Sair
+  </button>
+</div>
+
 <!-- LOGIN -->
 <div id="loginScreen">
   <div class="login-box">
-    <div class="login-logo">CLEAN <span>CAR</span></div>
+    <div class="login-logo">GBR <span>SISTEMAS</span></div>
     <div class="login-sub">Sistema Integrado v4.0</div>
     <div class="lf"><label>E-mail</label><input type="email" id="loginEmail" placeholder="seu@email.com" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()"></div>
     <div class="lf"><label>Senha</label><input type="password" id="loginPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')window.doLogin()"></div>
@@ -397,7 +497,7 @@ body.light .badge{opacity:.9}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="tb-logo">🚗&nbsp;CLEAN <span>CAR</span></div>
+  <div class="tb-logo">🚗&nbsp;GBR <span>SISTEMAS</span></div>
   <div class="tb-center">
     <span class="tb-date" id="topDate"></span>
     <span class="dot" id="syncDot"></span>
@@ -415,7 +515,7 @@ body.light .badge{opacity:.9}
   </div>
 </div>
 
-<div id="pwaInstallBanner"><span style="font-size:28px">&#128241;</span><div style="flex:1"><strong style="color:var(--accent);display:block">Instalar Clean Car</strong><span style="font-size:12px;color:var(--muted2)">Adicione a tela inicial</span></div><button class="btn btn-primary btn-sm" onclick="instalarPWA()">Instalar</button><button class="btn btn-ghost btn-sm" onclick="document.getElementById('pwaInstallBanner').classList.remove('show')">&#10005;</button></div>
+<div id="pwaInstallBanner"><span style="font-size:28px">&#128241;</span><div style="flex:1"><strong style="color:var(--accent);display:block">Instalar GBR Sistemas</strong><span style="font-size:12px;color:var(--muted2)">Adicione a tela inicial</span></div><button class="btn btn-primary btn-sm" onclick="instalarPWA()">Instalar</button><button class="btn btn-ghost btn-sm" onclick="document.getElementById('pwaInstallBanner').classList.remove('show')">&#10005;</button></div>
 <!-- BUSCA GLOBAL -->
 <div id="globalSearchOverlay" onclick="if(event.target===this)fecharBuscaGlobal()">
   <div class="gs-box">
@@ -1081,7 +1181,7 @@ body.light .badge{opacity:.9}
         <tbody id="usersAdminBody"></tbody></table>
         <div style="padding:12px 18px;font-size:11px;color:var(--muted2);border-top:1px solid var(--border)">
           💡 Para cadastrar novos usuários, acesse o 
-          <a href="https://console.firebase.google.com/project/clean-car-2bffd/authentication/users" target="_blank" style="color:var(--accent)">Firebase Console → Authentication</a>.
+          <a href="https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/users" target="_blank" style="color:var(--accent)">Firebase Console → Authentication</a>.
           O status online é rastreado em tempo real via Firebase.
         </div>
       </div>
@@ -1195,7 +1295,7 @@ body.light .badge{opacity:.9}
         <div class="admin-card">
           <div class="admin-card-title">DADOS DA EMPRESA</div>
           <div class="fgrid" style="gap:12px">
-            <div class="fg"><label>Nome da Empresa</label><input id="emp_nome" placeholder="Clean Car Estética Automotiva"></div>
+            <div class="fg"><label>Nome da Empresa</label><input id="emp_nome" placeholder="Minha Empresa"></div>
             <div class="fg"><label>CNPJ</label><input id="emp_cnpj" placeholder="00.000.000/0000-00"></div>
             <div class="fg"><label>Telefone</label><input id="emp_tel" placeholder="(11) 99999-9999"></div>
             <div class="fg"><label>Endereço</label><input id="emp_end" placeholder="Endereço completo"></div>
@@ -1228,7 +1328,7 @@ body.light .badge{opacity:.9}
             <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px">FONTE</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px"><div class="font-option" id="font_modern" onclick="aplicarFonte('modern')"><div style="font-weight:700;font-size:16px">Aa</div><div style="font-size:10px;color:var(--muted2)">Moderna</div></div><div class="font-option" id="font_bold" onclick="aplicarFonte('bold')"><div style="font-weight:900;font-size:16px">Aa</div><div style="font-size:10px;color:var(--muted2)">Bold</div></div><div class="font-option" id="font_tech" onclick="aplicarFonte('tech')"><div style="font-family:monospace;font-weight:700;font-size:16px">Aa</div><div style="font-size:10px;color:var(--muted2)">Tech</div></div><div class="font-option" id="font_classic" onclick="aplicarFonte('classic')"><div style="font-family:serif;font-weight:700;font-size:16px">Aa</div><div style="font-size:10px;color:var(--muted2)">Classic</div></div></div>
             <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px">NOME DO SISTEMA</div>
-            <div class="fg" style="margin-bottom:12px"><input id="empSistNome" placeholder="Ex: CLEAN CAR" oninput="previewNomeSist(this.value)"></div>
+            <div class="fg" style="margin-bottom:12px"><input id="empSistNome" placeholder="Ex: MINHA EMPRESA" oninput="previewNomeSist(this.value)"></div>
             <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:8px">COR PRINCIPAL (ACCENT)</div>
 
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1292,7 +1392,7 @@ body.light .badge{opacity:.9}
               <button onclick="toggleSenhaVis('adm_evo_key',this)" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted2);font-size:14px">👁</button>
             </div>
           </div>
-          <div class="fg"><label>Instância</label><input id="adm_evo_instance" placeholder="cleancar" onkeydown="if(event.key==='Enter')salvarIntegracaoEvo()"></div>
+          <div class="fg"><label>Instância</label><input id="adm_evo_instance" placeholder="gbr-sistemas" onkeydown="if(event.key==='Enter')salvarIntegracaoEvo()"></div>
           <div class="fg"><label>Código País+DDD padrão</label><input id="adm_evo_ddd" placeholder="55"></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1316,7 +1416,7 @@ body.light .badge{opacity:.9}
           <span id="firebaseStatusAdmin" class="badge bg-green">🟢 Ativo</span>
         </div>
         <div class="fgrid c2" style="gap:12px;margin-bottom:12px">
-          <div class="fg"><label>Project ID</label><input id="adm_fb_proj" placeholder="clean-car-2bffd" readonly style="background:var(--surface3)"></div>
+          <div class="fg"><label>Project ID</label><input id="adm_fb_proj" placeholder="gbr-sistemas-saas" readonly style="background:var(--surface3)"></div>
           <div class="fg"><label>Database URL</label><input id="adm_fb_db" placeholder="https://...firebaseio.com" readonly style="background:var(--surface3)"></div>
           <div class="fg"><label>Auth Domain</label><input id="adm_fb_auth" placeholder="....firebaseapp.com" readonly style="background:var(--surface3)"></div>
           <div class="fg"><label>API Key</label>
@@ -1328,7 +1428,7 @@ body.light .badge{opacity:.9}
         </div>
         <div style="background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.2);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--muted2)">
           💡 Para alterar o Firebase, edite as credenciais no arquivo HTML (bloco <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">firebaseConfig</code>) e suba novamente via Deploy.
-          <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="window.open('https://console.firebase.google.com/project/clean-car-2bffd','_blank')">↗ Abrir Console</button>
+          <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas','_blank')">↗ Abrir Console</button>
         </div>
       </div>
 
@@ -1346,19 +1446,19 @@ body.light .badge{opacity:.9}
         <div style="display:flex;flex-direction:column;gap:10px">
           <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
             <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">PASSO 1 — Restringir API Key por domínio (Google Cloud)</div>
-            <div style="font-size:12px;color:var(--muted2);line-height:1.6;margin-bottom:8px">Google Cloud Console → Credenciais → sua API Key → Restrições de aplicativo → Referenciadores HTTP → adicione <strong style="color:var(--accent)">glauberlincoln25-sudo.github.io/cleancar/*</strong></div>
+            <div style="font-size:12px;color:var(--muted2);line-height:1.6;margin-bottom:8px">Google Cloud Console → Credenciais → sua API Key → Restrições de aplicativo → Referenciadores HTTP → adicione <strong style="color:var(--accent)">gbrsistemassa.github.io/gbr-sistemas/*</strong></div>
             <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.cloud.google.com/apis/credentials','_blank')">↗ Google Cloud Console</button>
           </div>
           <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
             <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">PASSO 2 — Regras do Realtime Database</div>
             <div style="font-size:12px;color:var(--muted2);margin-bottom:6px">Firebase Console → Realtime Database → Regras → substitua por:</div>
             <div style="background:var(--surface3);border-radius:6px;padding:10px;font-size:11px;font-family:var(--font-m);color:var(--accent2)">{ "rules": { ".read": "auth != null", ".write": "auth != null" } }</div>
-            <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="window.open('https://console.firebase.google.com/project/clean-car-2bffd/database/rules','_blank')">↗ Firebase Rules</button>
+            <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/database/rules','_blank')">↗ Firebase Rules</button>
           </div>
           <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
             <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">PASSO 3 — Autorizar somente seu domínio no Auth</div>
-            <div style="font-size:12px;color:var(--muted2);line-height:1.6;margin-bottom:8px">Firebase → Authentication → Settings → Authorized domains → mantenha apenas <strong style="color:var(--accent)">glauberlincoln25-sudo.github.io/cleancar</strong> e localhost.</div>
-            <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.firebase.google.com/project/clean-car-2bffd/authentication/settings','_blank')">↗ Auth Settings</button>
+            <div style="font-size:12px;color:var(--muted2);line-height:1.6;margin-bottom:8px">Firebase → Authentication → Settings → Authorized domains → mantenha apenas <strong style="color:var(--accent)">gbrsistemassa.github.io/gbr-sistemas</strong> e localhost.</div>
+            <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/settings','_blank')">↗ Auth Settings</button>
           </div>
         </div>
       </div>
@@ -1370,7 +1470,7 @@ body.light .badge{opacity:.9}
             <div style="width:40px;height:40px;border-radius:10px;background:rgba(0,194,203,.15);display:flex;align-items:center;justify-content:center;font-size:22px">🌐</div>
             <div>
               <div style="font-weight:600;font-size:15px">Netlify — Hospedagem</div>
-              <div style="font-size:12px;color:var(--muted2)">Site: glauberlincoln25-sudo.github.io/cleancar</div>
+              <div style="font-size:12px;color:var(--muted2)">Site: gbrsistemassa.github.io/gbr-sistemas</div>
             </div>
           </div>
           <button class="btn btn-outline btn-sm" onclick="showAdminTab('deploy',document.querySelector('#adminTabs .ptab:nth-child(6)'))">🚀 Ir para Deploy</button>
@@ -1439,12 +1539,12 @@ body.light .badge{opacity:.9}
           <div class="admin-card-title">📊 STATUS DO SITE</div>
           <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
             <div class="crow">
-              <div><div style="font-size:13px">Site Netlify</div><div style="font-size:11px;color:var(--muted2)">glauberlincoln25-sudo.github.io/cleancar</div></div>
-              <button class="btn btn-ghost btn-sm" onclick="window.open('https://glauberlincoln25-sudo.github.io/cleancar','_blank')">↗ Abrir</button>
+              <div><div style="font-size:13px">Site Netlify</div><div style="font-size:11px;color:var(--muted2)">gbrsistemassa.github.io/gbr-sistemas</div></div>
+              <button class="btn btn-ghost btn-sm" onclick="window.open('https://gbrsistemassa.github.io/gbr-sistemas','_blank')">↗ Abrir</button>
             </div>
             <div class="crow">
               <div><div style="font-size:13px">Firebase Console</div><div style="font-size:11px;color:var(--muted2)">Banco de dados e autenticação</div></div>
-              <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.firebase.google.com/project/clean-car-2bffd','_blank')">↗ Abrir</button>
+              <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas','_blank')">↗ Abrir</button>
             </div>
             <div class="crow">
               <div><div style="font-size:13px">Railway (Evolution API)</div><div style="font-size:11px;color:var(--muted2)">Hospedagem da API WhatsApp</div></div>
@@ -1490,7 +1590,7 @@ body.light .badge{opacity:.9}
     </div>
 
     <div id="adminTab-backup" style="display:none"><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"><div class="admin-card"><div class="admin-card-title">&#128190; BACKUP AUTOMATICO</div><div class="crow" style="margin-bottom:14px"><div><div style="font-size:13px">Backup semanal automatico</div></div><button class="toggle" id="togBackupAuto" onclick="toggleBackupAuto(this)"></button></div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-primary" onclick="fazerBackupManual()">&#128190; Backup Agora</button><button class="btn btn-ghost" onclick="listarBackups()">&#128203; Ver Backups</button><button class="btn btn-ghost" onclick="exportBackup()">&#8595; Exportar JSON</button></div></div><div class="admin-card"><div class="admin-card-title">&#128202; STATUS</div><div style="display:flex;flex-direction:column;gap:8px" id="backupStatsCards"><div class="crow"><span>Clientes</span><button class="btn btn-ghost btn-sm" onclick="contarRegistros('clientes',this)">Contar</button></div><div class="crow"><span>Agendamentos</span><button class="btn btn-ghost btn-sm" onclick="contarRegistros('agendamentos',this)">Contar</button></div><div class="crow"><span>Financeiro</span><button class="btn btn-ghost btn-sm" onclick="contarRegistros('financeiro',this)">Contar</button></div></div><button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="contarTodos()">Contar Todos</button></div></div></div>
-    <div id="adminTab-seguranca" style="display:none"><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"><div class="admin-card"><div class="admin-card-title">&#128274; CONTROLES</div><div style="display:flex;flex-direction:column;gap:10px"><div class="crow"><div><div style="font-size:13px">Notificacoes push</div></div><button class="btn btn-outline btn-sm" onclick="solicitarPermissaoNotificacao()">Ativar</button></div><div class="crow"><div><div style="font-size:13px;color:var(--red)">Logout de todos</div></div><button class="btn btn-danger btn-sm" onclick="forcarLogoutTodos()">&#9167; Logout</button></div></div><div style="margin-top:14px"><div style="font-size:11px;color:var(--muted2);margin-bottom:8px">ALTERAR SENHA ADM</div><div class="fg" style="margin-bottom:8px"><label>Senha atual</label><input type="password" id="seg_senhaAdm" placeholder="Senha atual"></div><div class="fg" style="margin-bottom:8px"><label>Nova senha</label><input type="password" id="seg_novaSenha" placeholder="Nova senha"></div><button class="btn btn-primary" onclick="alterarSenhaAdm()">&#10003; Alterar</button></div></div><div class="admin-card"><div class="admin-card-title">&#128737; SEGURANCA</div><div style="font-size:12px;color:var(--muted2);line-height:1.9;background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.2);border-radius:8px;padding:12px;margin-bottom:12px">&#10003; Regras Firebase auth!=null<br>&#10003; Dominio autorizado<br>&#10003; API Key restringida<br>&#10003; Senha ADM configurada<br>&#10003; Backup ativo</div><div style="display:flex;flex-direction:column;gap:6px"><button class="btn btn-outline" onclick="window.open('https://console.firebase.google.com/project/clean-car-2bffd/database/rules','_blank')">&#8599; Regras Firebase</button><button class="btn btn-outline" onclick="window.open('https://console.firebase.google.com/project/clean-car-2bffd/authentication/settings','_blank')">&#8599; Auth Firebase</button></div></div></div></div>
+    <div id="adminTab-seguranca" style="display:none"><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"><div class="admin-card"><div class="admin-card-title">&#128274; CONTROLES</div><div style="display:flex;flex-direction:column;gap:10px"><div class="crow"><div><div style="font-size:13px">Notificacoes push</div></div><button class="btn btn-outline btn-sm" onclick="solicitarPermissaoNotificacao()">Ativar</button></div><div class="crow"><div><div style="font-size:13px;color:var(--red)">Logout de todos</div></div><button class="btn btn-danger btn-sm" onclick="forcarLogoutTodos()">&#9167; Logout</button></div></div><div style="margin-top:14px"><div style="font-size:11px;color:var(--muted2);margin-bottom:8px">ALTERAR SENHA ADM</div><div class="fg" style="margin-bottom:8px"><label>Senha atual</label><input type="password" id="seg_senhaAdm" placeholder="Senha atual"></div><div class="fg" style="margin-bottom:8px"><label>Nova senha</label><input type="password" id="seg_novaSenha" placeholder="Nova senha"></div><button class="btn btn-primary" onclick="alterarSenhaAdm()">&#10003; Alterar</button></div></div><div class="admin-card"><div class="admin-card-title">&#128737; SEGURANCA</div><div style="font-size:12px;color:var(--muted2);line-height:1.9;background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.2);border-radius:8px;padding:12px;margin-bottom:12px">&#10003; Regras Firebase auth!=null<br>&#10003; Dominio autorizado<br>&#10003; API Key restringida<br>&#10003; Senha ADM configurada<br>&#10003; Backup ativo</div><div style="display:flex;flex-direction:column;gap:6px"><button class="btn btn-outline" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/database/rules','_blank')">&#8599; Regras Firebase</button><button class="btn btn-outline" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/settings','_blank')">&#8599; Auth Firebase</button></div></div></div></div>
     <!-- TAB: AUDITORIA -->
     <div id="adminTab-auditoria" style="display:none">
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
@@ -1930,13 +2030,13 @@ body.light .badge{opacity:.9}
       <div class="admin-card" style="grid-column:1/-1">
         <div class="admin-card-title">🏠 VISÃO GERAL DO SISTEMA</div>
         <div style="background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.2);border-radius:10px;padding:16px;margin-bottom:16px">
-          <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px">CLEAN CAR v4.0 — Sistema Integrado de Estética Automotiva</div>
+          <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px">GBR SISTEMAS v1.0 — Plataforma de Gestão</div>
           <div style="font-size:12px;color:var(--muted2);line-height:1.9">
             Hospedagem: <strong style="color:var(--text)">GitHub Pages</strong> (gratuito, sem limite)<br>
             Banco de dados: <strong style="color:var(--text)">Firebase Realtime Database</strong> (gratuito, em nuvem)<br>
             Autenticação: <strong style="color:var(--text)">Firebase Authentication</strong><br>
-            URL do sistema: <strong style="color:var(--accent)">https://glauberlincoln25-sudo.github.io/cleancar/</strong><br>
-            Firebase Console: <strong style="color:var(--text)">console.firebase.google.com → projeto clean-car-2bffd</strong>
+            URL do sistema: <strong style="color:var(--accent)">https://gbrsistemassa.github.io/gbr-sistemas/</strong><br>
+            Firebase Console: <strong style="color:var(--text)">console.firebase.google.com → projeto gbr-sistemas-saas</strong>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
@@ -1950,14 +2050,14 @@ body.light .badge{opacity:.9}
         <div class="admin-card-title">🔐 LOGIN E ACESSO</div>
         <div style="display:flex;flex-direction:column;gap:10px">
           <div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:12px;color:var(--muted2);line-height:1.8">
-            <strong style="color:var(--text)">1. Acessar o sistema:</strong> Abra <strong style="color:var(--accent)">https://glauberlincoln25-sudo.github.io/cleancar/</strong><br>
+            <strong style="color:var(--text)">1. Acessar o sistema:</strong> Abra <strong style="color:var(--accent)">https://gbrsistemassa.github.io/gbr-sistemas/</strong><br>
             <strong style="color:var(--text)">2. Login:</strong> Digite e-mail e senha → clique ▶ Entrar (ou pressione Enter)<br>
             <strong style="color:var(--text)">3. Indicador de conexão:</strong> 🟢 Sincronizado = Firebase online · 🔴 = offline<br>
             <strong style="color:var(--text)">4. Sair:</strong> Clique em "Sair" no canto superior direito<br>
             <strong style="color:var(--text)">5. Criar usuários:</strong> Firebase Console → Authentication → Users → Add User
           </div>
           <div style="background:rgba(255,82,82,.06);border:1px solid rgba(255,82,82,.2);border-radius:8px;padding:12px;font-size:12px;color:var(--muted2)">
-            ⚠️ <strong style="color:var(--red)">Se o login não funcionar:</strong> Verifique se o domínio está autorizado em Firebase → Authentication → Settings → Authorized Domains → deve conter <strong>glauberlincoln25-sudo.github.io</strong>
+            ⚠️ <strong style="color:var(--red)">Se o login não funcionar:</strong> Verifique se o domínio está autorizado em Firebase → Authentication → Settings → Authorized Domains → deve conter <strong>gbrsistemassa.github.io</strong>
           </div>
         </div>
       </div>
@@ -1966,7 +2066,7 @@ body.light .badge{opacity:.9}
         <div class="admin-card-title">🚀 COMO ATUALIZAR O SISTEMA</div>
         <div style="font-size:12px;color:var(--muted2);line-height:2">
           <strong style="color:var(--text)">1.</strong> Receba o novo <strong>index.html</strong> atualizado<br>
-          <strong style="color:var(--text)">2.</strong> Acesse <strong style="color:var(--accent)">github.com/glauberlincoln25-sudo/cleancar</strong><br>
+          <strong style="color:var(--text)">2.</strong> Acesse <strong style="color:var(--accent)">github.com/GBRsistemassa/gbr-sistemas</strong><br>
           <strong style="color:var(--text)">3.</strong> Clique em <strong>Add file → Upload files</strong><br>
           <strong style="color:var(--text)">4.</strong> Arraste o novo index.html → clique <strong>Commit changes</strong><br>
           <strong style="color:var(--text)">5.</strong> Aguarde 2-3 minutos → acesse o site normalmente<br>
@@ -2151,8 +2251,8 @@ body.light .badge{opacity:.9}
         <div class="admin-card-title">💬 CONFIGURAR WHATSAPP</div>
         <div style="font-size:12px;color:var(--muted2);line-height:2">
           <strong style="color:var(--text)">Acessar:</strong> Menu → WhatsApp → aba API<br>
-          <strong style="color:var(--text)">Servidor Evolution API:</strong> https://cleancar-evolution.onrender.com<br>
-          <strong style="color:var(--text)">API Key:</strong> cleancar2025 | <strong style="color:var(--text)">Instância:</strong> cleancar<br>
+          <strong style="color:var(--text)">Servidor Evolution API:</strong> https://gbr-evolution.onrender.com<br>
+          <strong style="color:var(--text)">API Key:</strong> gbrsistemas2025 | <strong style="color:var(--text)">Instância:</strong> gbr-sistemas<br>
           <strong style="color:var(--text)">Testar conexão:</strong> Clique 🔌 Testar — se aparecer 🟢 está pronto<br>
           <strong style="color:var(--text)">Se aparecer 🔴:</strong> Clique 📱 Conectar QR Code → escaneie com o WhatsApp do celular<br>
           <strong style="color:var(--text)">Servidor dormindo?</strong> Clique ⏰ Acordar → aguarde 30s → teste novamente
@@ -2313,7 +2413,7 @@ body.light .badge{opacity:.9}
             <div style="font-weight:700;color:var(--red);margin-bottom:6px">❌ Login não funciona / "firebase is not defined"</div>
             <div style="color:var(--muted2);line-height:1.8">
               1. Verifique sua conexão com a internet<br>
-              2. Firebase Console → Authentication → Settings → Authorized Domains → confirme que <strong style="color:var(--text)">glauberlincoln25-sudo.github.io</strong> está na lista<br>
+              2. Firebase Console → Authentication → Settings → Authorized Domains → confirme que <strong style="color:var(--text)">gbrsistemassa.github.io</strong> está na lista<br>
               3. Se não estiver → clique "Add domain" e adicione<br>
               4. Tente em modo aba anônima (Ctrl+Shift+N)
             </div>
@@ -2337,7 +2437,7 @@ body.light .badge{opacity:.9}
               1. WhatsApp → aba API → clique ⏰ Acordar → aguarde 30-60 segundos<br>
               2. Clique 🔌 Testar Conexão novamente<br>
               3. Se aparecer 🟢 → está pronto<br>
-              4. Se ainda der erro → acesse <strong style="color:var(--text)">dashboard.render.com</strong> → cleancar-evolution → clique "Manual Deploy"<br>
+              4. Se ainda der erro → acesse <strong style="color:var(--text)">dashboard.render.com</strong> → gbr-evolution → clique "Manual Deploy"<br>
               5. Se o número desconectou → clique 📱 Conectar QR Code → escaneie com o celular
             </div>
           </div>
@@ -2348,7 +2448,7 @@ body.light .badge{opacity:.9}
               O GitHub Pages pode demorar 2-5 minutos para atualizar.<br>
               1. Aguarde alguns minutos e atualize a página (Ctrl+F5 ou Ctrl+Shift+R)<br>
               2. Tente em uma aba anônima (sem cache)<br>
-              3. Verifique em github.com/glauberlincoln25-sudo/cleancar → aba Actions → confirme que o deploy foi concluído (ícone verde ✓)
+              3. Verifique em github.com/GBRsistemassa/gbr-sistemas → aba Actions → confirme que o deploy foi concluído (ícone verde ✓)
             </div>
           </div>
 
@@ -2376,9 +2476,9 @@ body.light .badge{opacity:.9}
       <div class="admin-card" style="margin-top:14px">
         <div class="admin-card-title">📋 VARIÁVEIS DE AMBIENTE — Evolution API (Render.com)</div>
         <div style="font-size:12px;color:var(--muted2);line-height:2">
-          Se o WhatsApp parar de funcionar, acesse <strong style="color:var(--text)">dashboard.render.com → cleancar-evolution → Environment</strong> e confirme estas variáveis:<br>
+          Se o WhatsApp parar de funcionar, acesse <strong style="color:var(--text)">dashboard.render.com → gbr-evolution → Environment</strong> e confirme estas variáveis:<br>
           <code style="display:block;background:var(--surface);padding:10px;border-radius:8px;margin-top:8px;color:var(--accent);line-height:2">
-            AUTHENTICATION_API_KEY = cleancar2025<br>
+            AUTHENTICATION_API_KEY = gbrsistemas2025<br>
             AUTHENTICATION_TYPE = apikey<br>
             PORT = 8080<br>
             SERVER_TYPE = http<br>
@@ -2401,7 +2501,7 @@ body.light .badge{opacity:.9}
           <div style="background:var(--surface2);border-radius:8px;padding:12px">
             <div style="font-weight:700;color:var(--text);margin-bottom:6px">PASSO 1 — Regras do Firebase Database</div>
             <div style="color:var(--muted2);line-height:1.8">
-              <a href="https://console.firebase.google.com/project/clean-car-2bffd/database/rules" target="_blank" style="color:var(--accent)">↗ Abrir Firebase Rules</a><br>
+              <a href="https://console.firebase.google.com/project/gbr-sistemas-saas/database/rules" target="_blank" style="color:var(--accent)">↗ Abrir Firebase Rules</a><br>
               Substitua o conteúdo por:<br>
               <code style="display:block;background:var(--surface);padding:8px;border-radius:6px;margin-top:6px;color:var(--accent)">{"rules":{".read":"auth != null",".write":"auth != null"}}</code><br>
               → Clique <strong>Publish</strong>
@@ -2411,11 +2511,11 @@ body.light .badge{opacity:.9}
           <div style="background:var(--surface2);border-radius:8px;padding:12px">
             <div style="font-weight:700;color:var(--text);margin-bottom:6px">PASSO 2 — Domínios Autorizados</div>
             <div style="color:var(--muted2);line-height:1.8">
-              <a href="https://console.firebase.google.com/project/clean-car-2bffd/authentication/settings" target="_blank" style="color:var(--accent)">↗ Abrir Auth Settings</a><br>
+              <a href="https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/settings" target="_blank" style="color:var(--accent)">↗ Abrir Auth Settings</a><br>
               Em "Authorized Domains" confirme que estão presentes:<br>
-              • <strong style="color:var(--text)">glauberlincoln25-sudo.github.io</strong><br>
+              • <strong style="color:var(--text)">gbrsistemassa.github.io</strong><br>
               • <strong style="color:var(--text)">localhost</strong> (para testes locais)<br>
-              • <strong style="color:var(--text)">clean-car-2bffd.firebaseapp.com</strong>
+              • <strong style="color:var(--text)">gbr-sistemas-saas.firebaseapp.com</strong>
             </div>
           </div>
 
@@ -2424,7 +2524,7 @@ body.light .badge{opacity:.9}
             <div style="color:var(--muted2);line-height:1.8">
               <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--accent)">↗ Abrir Google Cloud Credentials</a><br>
               Clique na sua API Key → Restrições de aplicativo → Referenciadores HTTP → adicione:<br>
-              <code style="background:var(--surface);padding:4px 8px;border-radius:4px;color:var(--accent)">glauberlincoln25-sudo.github.io/*</code>
+              <code style="background:var(--surface);padding:4px 8px;border-radius:4px;color:var(--accent)">gbrsistemassa.github.io/*</code>
             </div>
           </div>
 
@@ -2659,9 +2759,10 @@ window.addEventListener('firebaseReady', () => {
 
 // ── DATA LAYER ──────────────────────────────
 async function dbGet(key) {
+  const tid = window._tenantId || 'shared';
   if (isFB && window._db) {
     try {
-      const snap = await window._fbGet(window._fbRef(window._db, 'cleancar/' + key));
+      const snap = await window._fbGet(window._fbRef(window._db, 'tenants/' + tid + '/' + key));
       const val = snap.val();
       if (val === null) return (['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas'].includes(key)) ? {} : [];
       return Array.isArray(val) ? val : (typeof val === 'object' ? Object.values(val) : val);
@@ -2670,15 +2771,17 @@ async function dbGet(key) {
   return lsGet(key);
 }
 async function dbSet(key, val) {
+  const tid = window._tenantId || 'shared';
   if (isFB && window._db) {
-    try { await window._fbSet(window._fbRef(window._db, 'cleancar/' + key), val); return; }
+    try { await window._fbSet(window._fbRef(window._db, 'tenants/' + tid + '/' + key), val); return; }
     catch(e) { console.warn('FB write failed', e); }
   }
   lsSet(key, val);
 }
 function dbListen(key, cb) {
+  const tid = window._tenantId || 'shared';
   if (!isFB || !window._db) return;
-  window._fbOnValue(window._fbRef(window._db, 'cleancar/' + key), snap => {
+  window._fbOnValue(window._fbRef(window._db, 'tenants/' + tid + '/' + key), snap => {
     const val = snap.val();
     if (val === null) { cb(['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas'].includes(key)?{}:[]); return; }
     cb(Array.isArray(val) ? val : (typeof val === 'object' ? Object.values(val) : val));
@@ -2784,7 +2887,7 @@ async function initApp() {
     {id:6,nome:'POLIDOR REFINO',cat:'Polimento',qtd:'1L',quantidade:1,custo:180,rendimento:15},
   ]);
   const cfg = await dbGet('config');
-  if (!cfg || !cfg.empresa) await dbSet('config',{empresa:'Clean Car Estética Automotiva',togEst:true,togFid:true,togFin:true,togEst2:true});
+  if (!cfg || !cfg.empresa) await dbSet('config',{empresa:'Minha Empresa',togEst:true,togFid:true,togFin:true,togEst2:true});
   const regras = await dbGet('regras');
   if (!regras || !regras.pts50) await dbSet('regras',{pts50:50,pts100:100,pts200:200,estMin:2,estCrit:0,descMax:30,descAprov:20,togFin:true,togFid:true,togEst:true});
 
@@ -2827,7 +2930,7 @@ async function initApp() {
         const set = function(id,v){ const el=document.getElementById(id); if(el)el.value=v||''; };
         set('adm_evo_url', evoCfg.url);
         set('adm_evo_key', evoCfg.key);
-        set('adm_evo_instance', evoCfg.instance||'cleancar');
+        set('adm_evo_instance', evoCfg.instance||'gbr-sistemas');
         set('adm_evo_ddd', evoCfg.ddd||'55');
       }
     } catch(e) { console.warn('Evo config:', e); }
@@ -3823,7 +3926,7 @@ function imprimirCaixa(){
   const win=window.open('','_blank','width=600,height=800');
   const movs=document.getElementById('caixaBody').innerHTML;
   const cards=document.getElementById('caixaCards').innerHTML;
-  win.document.write(`<html><head><title>Fechamento de Caixa</title><style>body{font-family:Arial;padding:20px;color:#000}h2{margin-bottom:8px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #ccc;padding:6px 10px;font-size:12px}th{background:#f0f0f0}.cards{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.card{border:1px solid #ccc;border-radius:6px;padding:10px;min-width:120px}</style></head><body><h2>Clean Car — Fechamento de Caixa</h2><p><strong>Data:</strong> ${document.getElementById('caixaDataLabel').textContent}</p><p><strong>Operador:</strong> ${window._currentAuthUser?.email||'—'}</p><hr><h3>Resumo</h3><div class="cards">${cards.replace(/<div class="cv[^"]*">/g,'<div class="cv"><strong>').replace(/<\/div>/g,'</strong></div>').replace(/<button[^>]*>.*?<\/button>/gs,'')}</div><h3>Movimentações</h3><table><thead><tr><th>Hora</th><th>Tipo</th><th>Descrição</th><th>Pgto</th><th>Valor</th><th>Operador</th></tr></thead><tbody>${movs.replace(/<button[^>]*>.*?<\/button>/gs,'')}</tbody></table><br><p style="font-size:12px;color:#666">Impresso em ${new Date().toLocaleString('pt-BR')} — Sistema Clean Car v4.0</p></body></html>`);
+  win.document.write(`<html><head><title>Fechamento de Caixa</title><style>body{font-family:Arial;padding:20px;color:#000}h2{margin-bottom:8px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #ccc;padding:6px 10px;font-size:12px}th{background:#f0f0f0}.cards{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.card{border:1px solid #ccc;border-radius:6px;padding:10px;min-width:120px}</style></head><body><h2>GBR Sistemas — Fechamento de Caixa</h2><p><strong>Data:</strong> ${document.getElementById('caixaDataLabel').textContent}</p><p><strong>Operador:</strong> ${window._currentAuthUser?.email||'—'}</p><hr><h3>Resumo</h3><div class="cards">${cards.replace(/<div class="cv[^"]*">/g,'<div class="cv"><strong>').replace(/<\/div>/g,'</strong></div>').replace(/<button[^>]*>.*?<\/button>/gs,'')}</div><h3>Movimentações</h3><table><thead><tr><th>Hora</th><th>Tipo</th><th>Descrição</th><th>Pgto</th><th>Valor</th><th>Operador</th></tr></thead><tbody>${movs.replace(/<button[^>]*>.*?<\/button>/gs,'')}</tbody></table><br><p style="font-size:12px;color:#666">Impresso em ${new Date().toLocaleString('pt-BR')} — Sistema GBR Sistemas v1.0</p></body></html>`);
   win.document.close();
   win.print();
   auditLog('caixa','Caixa impresso');
@@ -3920,7 +4023,7 @@ async function exportRelatorio(){
   const fin=await dbGet('financeiro')||[];
   const keys=['data','tipo','cat','desc','valor','pgto','resp'];const labs=['Data','Tipo','Categoria','Descrição','Valor','Pagamento','Responsável'];
   let csv=labs.join(';')+'\n';fin.forEach(f=>csv+=keys.map(k=>'"'+(f[k]||'')+'"').join(';')+'\n');
-  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='relatorio_cleancar.csv';a.click();
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='relatorio_gbrsistemas.csv';a.click();
   await auditLog('export','Relatório exportado');
   toast('Exportado!','ok');
 }
@@ -4418,14 +4521,14 @@ async function carregarIntegracoes(){
   const evoCfg=await dbGet('evolutionConfig')||{};
   const set=(id,v)=>{const e=document.getElementById(id);if(e&&v)e.value=v;};
   set('adm_evo_url',evoCfg.url);set('adm_evo_key',evoCfg.key);
-  set('adm_evo_instance',evoCfg.instance||'cleancar');set('adm_evo_ddd',evoCfg.ddd||'55');
+  set('adm_evo_instance',evoCfg.instance||'gbr-sistemas');set('adm_evo_ddd',evoCfg.ddd||'55');
   const togEvo=document.getElementById('togEvoAtivo');
   if(togEvo)togEvo.className='toggle'+(evoCfg.url?' on':'');
   // Firebase (read-only display)
   const fbCfg={
-    proj:'clean-car-2bffd',
-    db:'https://clean-car-2bffd-default-rtdb.firebaseio.com',
-    auth:'clean-car-2bffd.firebaseapp.com',
+    proj:'gbr-sistemas-saas',
+    db:'https://gbr-sistemas-saas-default-rtdb.firebaseio.com',
+    auth:'gbr-sistemas-saas.firebaseapp.com',
     key:'AIzaSyBV4M48o18LRGev4ii-EJ27PuXvyiFyAtA'
   };
   set('adm_fb_proj',fbCfg.proj);set('adm_fb_db',fbCfg.db);
@@ -4446,7 +4549,7 @@ async function carregarIntegracoes(){
 async function salvarIntegracaoEvo(){
   const url=document.getElementById('adm_evo_url')?.value.trim().replace(/\/$/,'');
   const key=document.getElementById('adm_evo_key')?.value.trim();
-  const instance=document.getElementById('adm_evo_instance')?.value.trim()||'cleancar';
+  const instance=document.getElementById('adm_evo_instance')?.value.trim()||'gbr-sistemas';
   const ddd=document.getElementById('adm_evo_ddd')?.value.trim()||'55';
   if(!url||!key)return toast('Preencha URL e API Key!','err');
   const cfg={url,key,instance,ddd,salvoEm:new Date().toISOString()};
@@ -4609,7 +4712,7 @@ function baixarSistemaAtualizado(){
   const html=document.documentElement.outerHTML;
   const a=document.createElement('a');
   a.href='data:text/html;charset=utf-8,'+encodeURIComponent(html);
-  a.download='cleancar_v4_'+today()+'.html';
+  a.download='gbrsistemas_v1_'+today()+'.html';
   a.click();
   auditLog('export','Sistema baixado para deploy: '+today());
   toast('⬇ Download iniciado!','ok');
@@ -4761,7 +4864,7 @@ async function salvarRole(){
   fecharM('mRole');renderAcesso();toast('Nível salvo!','ok');
 }
 async function excluirRole(key){if(!confirm('Excluir nível?'))return;const roles=await dbGet('roles')||{};delete roles[key];await dbSet('roles',roles);await auditLog('delete','Nível excluído: '+key);renderAcesso();toast('Removido.','info')}
-function abrirModalNovoUser(){window.open('https://console.firebase.google.com/project/clean-car-2bffd/authentication/users','_blank')}
+function abrirModalNovoUser(){window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/users','_blank')}
 
 // ── REGRAS ───────────────────────────────────
 async function carregarRegras(){
@@ -5038,7 +5141,7 @@ async function exportAuditoria(){
   const logs=await dbGet('auditoria')||[];
   const keys=['ts','usuario','tipo','detalhe','dispositivo'];const labs=['Data/Hora','Usuário','Tipo','Detalhe','Dispositivo'];
   let csv=labs.join(';')+'\n';logs.forEach(l=>csv+=keys.map(k=>'"'+(l[k]||'')+'"').join(';')+'\n');
-  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='auditoria_cleancar.csv';a.click();
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='auditoria_gbrsistemas.csv';a.click();
   toast('Auditoria exportada!','ok');
 }
 
@@ -5083,7 +5186,7 @@ async function salvarEdicao(){
 // ── BACKUP ───────────────────────────────────
 async function exportBackup(){
   const data={clientes:await dbGet('clientes'),agendamentos:await dbGet('agendamentos'),financeiro:await dbGet('financeiro'),fidelidade:await dbGet('fidelidade'),estoque:await dbGet('estoque'),servicos:await dbGet('servicos'),checklists:await dbGet('checklists'),insumos:await dbGet('insumos'),config:await dbGet('config'),regras:await dbGet('regras'),empresa:await dbGet('empresa'),roles:await dbGet('roles'),telasCustom:await dbGet('telasCustom'),caixaDia:await dbGet('caixaDia'),exportadoEm:new Date().toISOString(),usuario:window._currentAuthUser?.email};
-  const a=document.createElement('a');a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(data,null,2));a.download='cleancar_backup_v4_'+today()+'.json';a.click();
+  const a=document.createElement('a');a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(data,null,2));a.download='gbrsistemas_backup_v1_'+today()+'.json';a.click();
   await auditLog('export','Backup completo exportado');toast('Backup exportado!','ok');
 }
 async function limparTudo(){if(!confirm('APAGAR TODOS OS DADOS?'))return;if(!confirm('Confirmar reset?'))return;for(const k of['clientes','agendamentos','financeiro','fidelidade','checklists','insumos','caixaDia'])await dbSet(k,[]);await auditLog('config','RESET TOTAL executado');toast('Dados limpos.','info')}
@@ -5313,7 +5416,7 @@ function removerLogo(){
   if(prev)prev.innerHTML='🚗';
   window._logoBase64=null;
   const logo=document.querySelector('.tb-logo');
-  if(logo)logo.innerHTML='🚗&nbsp;CLEAN <span>CAR</span>';
+  if(logo)logo.innerHTML='🚗&nbsp;GBR <span>SISTEMAS</span>';
 }
 
 async function salvarAparencia(){
@@ -5435,7 +5538,7 @@ function imprimirQRFidelidade(){
   .tip{font-size:11px;color:#666;margin-top:12px;border:1px dashed #ccc;padding:8px;border-radius:6px}
   @media print{button{display:none}}</style></head>
   <body>
-  <div class="logo">CLEAN <span>CAR</span></div>
+  <div class="logo">GBR <span>SISTEMAS</span></div>
   <div class="info">Cartão de Fidelidade</div>
   <div>${imgEl}</div>
   <div class="info">${nomeEl.innerHTML}</div>
@@ -5597,7 +5700,7 @@ function iniciarPresencaRealtime(){
   if(!me)return;
   const key=me.replace(/\./g,'_').replace(/@/g,'__at__');
   // Listener para detectar quando admin abre a aba acesso
-  window._fbOnValue(window._fbRef(window._db,'cleancar/presence'),snap=>{
+  window._fbOnValue(window._fbRef(window._db,'tenants/'+(window._tenantId||'shared')+'/presence'),snap=>{
     const pid=(document.querySelector('.page.active')||{}).id||'';
     if(pid==='page-admin'){
       const tab=document.getElementById('adminTab-acesso');
@@ -5922,7 +6025,7 @@ renderDash=async function(){await _rdOrig();await renderComparativoMensal();};
 window.solicitarPermissaoNotificacao=async function(){
   if(!('Notification' in window))return toast('Nao suportado pelo navegador','warn');
   var p=await Notification.requestPermission();
-  if(p==='granted'){toast('Notificacoes ativadas!','ok');new Notification('Clean Car',{body:'Notificacoes ativas!'});}
+  if(p==='granted'){toast('Notificacoes ativadas!','ok');new Notification('GBR Sistemas',{body:'Notificacoes ativas!'});}
   else toast('Permissao negada pelo usuario','err');
 };
 // ===== ABAS ADMIN =====
@@ -6011,7 +6114,7 @@ if (typeof carregarConfigEvo === 'undefined') {
         var set = function(id,v){ var el=document.getElementById(id); if(el)el.value=v||''; };
         set('adm_evo_url', cfg.url);
         set('adm_evo_key', cfg.key);
-        set('adm_evo_instance', cfg.instance||'cleancar');
+        set('adm_evo_instance', cfg.instance||'gbr-sistemas');
         set('adm_evo_ddd', cfg.ddd||'55');
       }
     } catch(e) {}
@@ -6134,442 +6237,6 @@ document.addEventListener('DOMContentLoaded', function() {
     cnpjEl.setAttribute('oninput', 'mCNPJ(this)');
   }
 });
-
-// ══════════════════════════════════════════════════
-// FUNÇÕES RESTAURADAS — NAVEGAÇÃO E MOBILE
-// ══════════════════════════════════════════════════
-
-// Toggle menu mobile (botão ☰ no topbar)
-window.toggleMobileMenu = function() {
-  var sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-  var isVisible = sidebar.style.display === 'block';
-  sidebar.style.display = isVisible ? 'none' : 'block';
-  sidebar.style.position = 'fixed';
-  sidebar.style.top = '52px';
-  sidebar.style.left = '0';
-  sidebar.style.zIndex = '500';
-  sidebar.style.width = '220px';
-  sidebar.style.height = 'calc(100vh - 52px)';
-};
-
-// Marcar item ativo no menu mobile
-window.setMobileActive = function(el) {
-  document.querySelectorAll('#mobileMenu .mm-item').forEach(function(i){ i.classList.remove('active'); });
-  if (el) el.classList.add('active');
-  // Fechar sidebar mobile se estiver aberto
-  var sidebar = document.getElementById('sidebar');
-  if (sidebar && window.innerWidth <= 900) sidebar.style.display = 'none';
-};
-
-// Fechar sidebar ao clicar em item do sidebar no mobile
-document.querySelectorAll('#sidebar .ni').forEach(function(ni) {
-  ni.addEventListener('click', function() {
-    if (window.innerWidth <= 900) {
-      var sidebar = document.getElementById('sidebar');
-      if (sidebar) sidebar.style.display = 'none';
-    }
-  });
-});
-
-// Toggle de tema claro/escuro
-window.toggleTheme = function() {
-  document.body.classList.toggle('light');
-  var btn = document.getElementById('themeBtn');
-  if (btn) btn.textContent = document.body.classList.contains('light') ? '☀️' : '🌙';
-  localStorage.setItem('cc4_theme', document.body.classList.contains('light') ? 'light' : 'dark');
-};
-// Restaurar tema salvo
-(function() {
-  var savedTheme = localStorage.getItem('cc4_theme');
-  if (savedTheme === 'light') {
-    document.body.classList.add('light');
-    var btn = document.getElementById('themeBtn');
-    if (btn) btn.textContent = '☀️';
-  }
-})();
-
-// Busca global
-window.abrirBuscaGlobal = function() {
-  var overlay = document.getElementById('globalSearchOverlay');
-  if (overlay) {
-    overlay.style.display = 'flex';
-    setTimeout(function() { var inp = document.getElementById('gsInput'); if (inp) inp.focus(); }, 100);
-  }
-};
-window.fecharBuscaGlobal = function() {
-  var overlay = document.getElementById('globalSearchOverlay');
-  if (overlay) overlay.style.display = 'none';
-  var inp = document.getElementById('gsInput');
-  if (inp) inp.value = '';
-};
-document.addEventListener('keydown', function(e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); window.abrirBuscaGlobal(); }
-  if (e.key === 'Escape') { window.fecharBuscaGlobal(); fecharM && fecharM; }
-});
-
-// Busca global — renderizar resultados
-window.renderBuscaGlobal = async function() {
-  var q = (document.getElementById('gsInput') || {}).value || '';
-  var res = document.getElementById('gsResults');
-  if (!res) return;
-  if (!q || q.length < 2) { res.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted2);font-size:13px">Digite para buscar em todo o sistema...</div>'; return; }
-  var clientes = await dbGet('clientes') || [];
-  var servicos = await dbGet('servicos') || [];
-  var agendamentos = await dbGet('agendamentos') || [];
-  var ql = q.toLowerCase();
-  var hits = [];
-  clientes.forEach(function(c) { if ((c.nome||'').toLowerCase().includes(ql)||(c.cpf||'').includes(ql)||(c.telefone||'').includes(ql)) hits.push({tipo:'Cliente',label:c.nome,sub:c.telefone||c.cpf||'',action:"goTo('banco')"}); });
-  servicos.forEach(function(s) { if ((s.nome||'').toLowerCase().includes(ql)) hits.push({tipo:'Serviço',label:s.nome,sub:fmt(s.preco),action:"goTo('servicos')"}); });
-  agendamentos.forEach(function(a) { if ((a.cliente||'').toLowerCase().includes(ql)||(a.veiculo||'').toLowerCase().includes(ql)) hits.push({tipo:'Agendamento',label:a.cliente,sub:a.data+' — '+a.servico,action:"goTo('agenda')"}); });
-  if (!hits.length) { res.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted2);font-size:13px">Nenhum resultado para "'+q+'"</div>'; return; }
-  res.innerHTML = hits.slice(0,12).map(function(h) {
-    return '<div onclick="'+h.action+';fecharBuscaGlobal()" style="display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .15s" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">'
-      +'<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:var(--surface3);color:var(--muted2)">'+h.tipo+'</span>'
-      +'<div><div style="font-size:13px">'+h.label+'</div><div style="font-size:11px;color:var(--muted2)">'+h.sub+'</div></div></div>';
-  }).join('');
-};
-window.navBuscaGlobal = function(e) { if (e.key === 'Escape') window.fecharBuscaGlobal(); };
-
-// PWA — instalar
-var _pwaInstallPrompt = null;
-window.addEventListener('beforeinstallprompt', function(e) { e.preventDefault(); _pwaInstallPrompt = e; var banner = document.getElementById('pwaInstallBanner'); if (banner) banner.classList.add('show'); });
-window.instalarPWA = async function() {
-  if (_pwaInstallPrompt) { _pwaInstallPrompt.prompt(); var r = await _pwaInstallPrompt.userChoice; if (r.outcome === 'accepted') { _pwaInstallPrompt = null; var banner = document.getElementById('pwaInstallBanner'); if (banner) banner.classList.remove('show'); } }
-  else { toast('Use o menu do navegador para instalar: "Adicionar à tela inicial"', 'info'); }
-};
-
-// ══════════════════════════════════════════════════
-// FUNÇÕES RESTAURADAS — ABAS WHATSAPP
-// ══════════════════════════════════════════════════
-
-window.showWATab = function(tab, el) {
-  document.querySelectorAll('[id^="waTab-"]').forEach(function(d){ d.style.display = 'none'; });
-  var target = document.getElementById('waTab-' + tab);
-  if (target) target.style.display = '';
-  document.querySelectorAll('#waTabs .ptab').forEach(function(b){ b.classList.remove('active'); });
-  if (el) el.classList.add('active');
-  if (tab === 'templates') renderTemplatesWA();
-  if (tab === 'historico') renderHistoricoWA();
-  if (tab === 'automacoes') renderAutomacoesWA();
-  if (tab === 'lote') renderLoteWA();
-};
-
-window.renderWhatsApp = async function() {
-  // Verificar status da Evolution API
-  var cfg = await dbGet('evolutionConfig') || {};
-  window._evoConfig = cfg;
-  var dot = document.getElementById('waStatusDot');
-  var lbl = document.getElementById('waStatusLabel');
-  if (cfg && cfg.url) {
-    if (dot) dot.style.background = 'var(--yellow)';
-    if (lbl) lbl.textContent = 'Verificando...';
-    try {
-      var ok = await testarConexaoEvo();
-      if (dot) dot.style.background = ok ? 'var(--green)' : 'var(--red)';
-      if (lbl) lbl.textContent = ok ? '🟢 Conectado' : '🔴 Desconectado';
-    } catch(e) {
-      if (dot) dot.style.background = 'var(--red)';
-      if (lbl) lbl.textContent = '🔴 Erro';
-    }
-  } else {
-    if (dot) dot.style.background = 'var(--border2)';
-    if (lbl) lbl.textContent = 'Não configurado';
-  }
-  // Carregar clientes no select de envio em lote
-  await renderLoteWA();
-  // Garantir aba ativa
-  var activeTab = document.querySelector('#waTabs .ptab.active');
-  if (!activeTab) {
-    var firstTab = document.querySelector('#waTabs .ptab');
-    if (firstTab) { firstTab.classList.add('active'); document.querySelectorAll('[id^="waTab-"]').forEach(function(d,i){ d.style.display = i===0?'':'none'; }); }
-  }
-};
-
-window.renderTemplatesWA = async function() {
-  var templates = await dbGet('waTemplates') || [];
-  var tbody = document.getElementById('waTemplatesBody');
-  if (!tbody) return;
-  if (!templates.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted2)">Nenhum template cadastrado</td></tr>'; return; }
-  tbody.innerHTML = templates.map(function(t,i) {
-    return '<tr><td>'+t.nome+'</td><td><span class="badge bg-blue">'+t.categoria+'</span></td>'
-      +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+t.mensagem+'</td>'
-      +'<td><button class="btn btn-sm btn-ghost" onclick="editarTemplateWA('+i+')">✎</button> '
-      +'<button class="btn btn-sm btn-danger" onclick="excluirTemplateWA('+i+')">✕</button></td></tr>';
-  }).join('');
-};
-
-window.salvarTemplateWA = async function() {
-  var nome = (document.getElementById('waTplNome')||{}).value || '';
-  var cat = (document.getElementById('waTplCat')||{}).value || '';
-  var msg = (document.getElementById('waTplMsg')||{}).value || '';
-  if (!nome || !msg) return toast('Preencha nome e mensagem!', 'err');
-  var templates = await dbGet('waTemplates') || [];
-  templates.push({ id: Date.now(), nome: nome, categoria: cat, mensagem: msg });
-  await dbSet('waTemplates', templates);
-  toast('Template salvo!', 'ok');
-  if (document.getElementById('waTplNome')) document.getElementById('waTplNome').value = '';
-  if (document.getElementById('waTplMsg')) document.getElementById('waTplMsg').value = '';
-  renderTemplatesWA();
-};
-
-window.excluirTemplateWA = async function(idx) {
-  if (!confirm('Excluir template?')) return;
-  var templates = await dbGet('waTemplates') || [];
-  templates.splice(idx, 1);
-  await dbSet('waTemplates', templates);
-  toast('Removido.', 'info');
-  renderTemplatesWA();
-};
-
-window.editarTemplateWA = async function(idx) {
-  var templates = await dbGet('waTemplates') || [];
-  var t = templates[idx];
-  if (!t) return;
-  if (document.getElementById('waTplNome')) document.getElementById('waTplNome').value = t.nome || '';
-  if (document.getElementById('waTplCat')) document.getElementById('waTplCat').value = t.categoria || '';
-  if (document.getElementById('waTplMsg')) document.getElementById('waTplMsg').value = t.mensagem || '';
-  templates.splice(idx, 1);
-  await dbSet('waTemplates', templates);
-  renderTemplatesWA();
-  toast('Editando template — salve novamente ao terminar.', 'info');
-};
-
-window.inserirVariavelWA = function(v) {
-  var el = document.getElementById('waTplMsg');
-  if (!el) return;
-  var pos = el.selectionStart || el.value.length;
-  el.value = el.value.slice(0, pos) + v + el.value.slice(pos);
-  el.focus();
-  previewTemplateWA();
-};
-
-window.previewTemplateWA = function() {
-  var msg = (document.getElementById('waTplMsg')||{}).value || '';
-  var preview = document.getElementById('waTplPreview');
-  if (!preview) return;
-  var exemplo = { nome:'João Silva', telefone:'(11) 99999-9999', data:'25/12/2025', hora:'10:00', servico:'Lavagem Completa', valor:'R$ 80,00', veiculo:'Corolla', placa:'ABC-1234', empresa:'Clean Car', cidade:'São Paulo', pontos:'150', beneficio:'Desconto 10%' };
-  var rendered = msg;
-  Object.keys(exemplo).forEach(function(k) { rendered = rendered.replace(new RegExp('{'+k+'}','g'), exemplo[k]); });
-  preview.textContent = rendered || 'Preview aparece aqui...';
-};
-
-window.renderHistoricoWA = async function() {
-  var hist = await dbGet('waHistorico') || [];
-  var tbody = document.getElementById('waHistoricoBody');
-  if (!tbody) return;
-  if (!hist.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted2)">Nenhuma mensagem enviada</td></tr>'; return; }
-  tbody.innerHTML = [...hist].reverse().slice(0,50).map(function(h) {
-    return '<tr><td style="font-size:11px;color:var(--muted2)">'+(h.ts?new Date(h.ts).toLocaleString('pt-BR'):'—')+'</td>'
-      +'<td>'+(h.cliente||'—')+'</td><td>'+(h.telefone||'—')+'</td>'
-      +'<td>'+(h.template||'—')+'</td><td>'+(h.via||'—')+'</td>'
-      +'<td>'+(h.operador||'—')+'</td>'
-      +'<td><button class="btn btn-sm btn-ghost" onclick="reenviarWA(\''+h.telefone+'\',\''+encodeURIComponent(h.mensagem||'')+'\')">↺</button></td></tr>';
-  }).join('');
-};
-
-window.reenviarWA = function(tel, msgEnc) {
-  var msg = decodeURIComponent(msgEnc);
-  var num = tel.replace(/\D/g,'');
-  window.open('https://wa.me/55'+num+'?text='+encodeURIComponent(msg), '_blank');
-};
-
-window.renderAutomacoesWA = async function() {
-  var cfg = await dbGet('waAutomacoes') || {};
-  var togIds = ['togConfirmacao','togLembrete','togConclusao','togPosAtend','togChecklist','togCancelado'];
-  togIds.forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) el.className = 'toggle' + (cfg[id] ? ' on' : '');
-  });
-  var statEl = document.getElementById('waAutoStatus');
-  if (statEl) statEl.textContent = window._evoConectado ? '🟢 API conectada' : '🔴 API não configurada';
-};
-
-window.salvarAutomacoesWA = async function() {
-  var togIds = ['togConfirmacao','togLembrete','togConclusao','togPosAtend','togChecklist','togCancelado'];
-  var cfg = {};
-  togIds.forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) cfg[id] = el.classList.contains('on');
-  });
-  // Salvar config de delay, pin, etc
-  var delay = (document.getElementById('waDelay')||{}).value;
-  var telTeste = (document.getElementById('waTelTeste')||{}).value;
-  var horIni = (document.getElementById('waHorIni')||{}).value;
-  var horFim = (document.getElementById('waHorFim')||{}).value;
-  if (delay) cfg.delay = parseInt(delay);
-  if (telTeste) cfg.telTeste = telTeste;
-  if (horIni) cfg.horIni = horIni;
-  if (horFim) cfg.horFim = horFim;
-  await dbSet('waAutomacoes', cfg);
-  toast('Configurações de automação salvas!', 'ok');
-};
-
-window.renderLoteWA = async function() {
-  var sel = document.getElementById('waLoteTemplate');
-  if (sel) {
-    var templates = await dbGet('waTemplates') || [];
-    sel.innerHTML = '<option value="">Selecione...</option>' + templates.map(function(t,i){ return '<option value="'+i+'">'+t.nome+'</option>'; }).join('');
-  }
-};
-
-window.filtrarDestinatariosWA = async function() {
-  var filtro = (document.getElementById('waLoteFiltro')||{}).value || '';
-  var clientes = await dbGet('clientes') || [];
-  var agendamentos = await dbGet('agendamentos') || [];
-  var hoje = today();
-  var amanha = new Date(); amanha.setDate(amanha.getDate()+1);
-  var amanhaStr = amanha.toISOString().split('T')[0];
-  var lista = [];
-  if (filtro === 'todos') {
-    lista = clientes.filter(function(c){ return c.telefone; });
-  } else if (filtro === 'inativos') {
-    var ultimoAg = {};
-    agendamentos.forEach(function(a){ if (!ultimoAg[a.clienteId]||a.data>ultimoAg[a.clienteId]) ultimoAg[a.clienteId]=a.data; });
-    var corte = new Date(); corte.setDate(corte.getDate()-90); var corteStr=corte.toISOString().split('T')[0];
-    lista = clientes.filter(function(c){ return c.telefone&&(!ultimoAg[c.id]||ultimoAg[c.id]<corteStr); });
-  } else if (filtro === 'amanha') {
-    var ids = agendamentos.filter(function(a){ return a.data===amanhaStr&&a.status!=='Cancelado'; }).map(function(a){ return a.clienteId; });
-    lista = clientes.filter(function(c){ return c.telefone&&ids.includes(c.id); });
-  } else if (filtro === 'aniversario') {
-    var mesAtual = new Date().getMonth()+1;
-    lista = clientes.filter(function(c){ if(!c.telefone||!c.dataNasc)return false; var m=parseInt((c.dataNasc||'').split('-')[1]); return m===mesAtual; });
-  } else if (filtro === 'pontos') {
-    var fid = await dbGet('fidelidade') || [];
-    var temPontos = {};
-    fid.forEach(function(f){ if(f.pontos>0)temPontos[f.clienteId]=true; });
-    lista = clientes.filter(function(c){ return c.telefone&&temPontos[c.id]; });
-  }
-  var cont = document.getElementById('waLoteDestinatarios');
-  if (cont) {
-    cont.innerHTML = lista.length ? lista.map(function(c){ return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'+c.nome+' — '+(c.telefone||'—')+'</div>'; }).join('') : '<div style="color:var(--muted2);padding:10px">Nenhum destinatário para este filtro</div>';
-  }
-  window._loteDestinatarios = lista;
-};
-
-window.iniciarEnvioLote = async function() {
-  var idx = (document.getElementById('waLoteTemplate')||{}).value;
-  if (idx === '' || idx === undefined) return toast('Selecione um template!', 'err');
-  var lista = window._loteDestinatarios || [];
-  if (!lista.length) return toast('Selecione um filtro e aguarde os destinatários!', 'err');
-  var templates = await dbGet('waTemplates') || [];
-  var tpl = templates[parseInt(idx)];
-  if (!tpl) return toast('Template inválido!', 'err');
-  if (!confirm('Enviar mensagem para '+lista.length+' clientes?')) return;
-  lista.forEach(function(c, i) {
-    setTimeout(function() {
-      var msg = (tpl.mensagem||'').replace(/{nome}/g,c.nome||'').replace(/{telefone}/g,c.telefone||'').replace(/{empresa}/g,'Clean Car');
-      var num = (c.telefone||'').replace(/\D/g,'');
-      window.open('https://wa.me/55'+num+'?text='+encodeURIComponent(msg), '_blank');
-    }, i * 1500);
-  });
-  toast('Abrindo WhatsApp para '+lista.length+' clientes...', 'info');
-};
-
-window.buscarCliWA = async function() {
-  var q = ((document.getElementById('waBuscaCli')||{}).value||'').toLowerCase();
-  var res = document.getElementById('waCliResultados');
-  if (!res) return;
-  if (!q || q.length < 2) { res.innerHTML = ''; return; }
-  var clientes = await dbGet('clientes') || [];
-  var hits = clientes.filter(function(c){ return (c.nome||'').toLowerCase().includes(q)||(c.cpf||'').includes(q)||(c.telefone||'').replace(/\D/g,'').includes(q.replace(/\D/g,'')); });
-  res.innerHTML = hits.slice(0,6).map(function(c){
-    return '<div onclick="selecionarCliWA('+JSON.stringify(c).replace(/"/g,'&quot;')+')" style="padding:8px 12px;cursor:pointer;border-radius:8px;border:1px solid var(--border);margin-bottom:4px;background:var(--surface2)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
-      +'<div style="font-size:13px;font-weight:500">'+c.nome+'</div>'
-      +'<div style="font-size:11px;color:var(--muted2)">'+(c.telefone||'Sem telefone')+'</div></div>';
-  }).join('') || '<div style="padding:10px;color:var(--muted2)">Nenhum cliente encontrado</div>';
-};
-
-window._waCliSelecionado = null;
-window.selecionarCliWA = async function(c) {
-  window._waCliSelecionado = c;
-  var res = document.getElementById('waCliResultados');
-  if (res) res.innerHTML = '';
-  var inp = document.getElementById('waBuscaCli');
-  if (inp) inp.value = c.nome;
-  var info = document.getElementById('waCliInfo');
-  if (info) {
-    info.innerHTML = '<div style="padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">'
-      +'<div style="font-weight:600">'+c.nome+'</div>'
-      +'<div style="font-size:12px;color:var(--muted2)">'+(c.telefone||'Sem telefone')+'</div></div>';
-  }
-  // Carregar templates no select
-  var tplSel = document.getElementById('waTplSelect');
-  if (tplSel) {
-    var templates = await dbGet('waTemplates') || [];
-    tplSel.innerHTML = '<option value="">Selecione um template...</option>' + templates.map(function(t,i){ return '<option value="'+i+'">'+t.nome+'</option>'; }).join('');
-  }
-};
-
-window.selecionarTemplateWA = async function() {
-  var idx = (document.getElementById('waTplSelect')||{}).value;
-  if (idx === '') return;
-  var templates = await dbGet('waTemplates') || [];
-  var tpl = templates[parseInt(idx)];
-  if (!tpl || !window._waCliSelecionado) return;
-  var c = window._waCliSelecionado;
-  var agendamentos = await dbGet('agendamentos') || [];
-  var ultimoAg = agendamentos.filter(function(a){ return a.clienteId===c.id; }).pop() || {};
-  var msg = (tpl.mensagem||'')
-    .replace(/{nome}/g, c.nome||'')
-    .replace(/{telefone}/g, c.telefone||'')
-    .replace(/{data}/g, ultimoAg.data||'')
-    .replace(/{hora}/g, ultimoAg.horario||'')
-    .replace(/{servico}/g, ultimoAg.servico||'')
-    .replace(/{valor}/g, fmt(ultimoAg.valorFinal||ultimoAg.valor||0))
-    .replace(/{veiculo}/g, ultimoAg.veiculo||'')
-    .replace(/{placa}/g, ultimoAg.placa||'')
-    .replace(/{empresa}/g, 'Clean Car');
-  var prev = document.getElementById('waMsgFinal');
-  if (prev) prev.value = msg;
-  var prevBox = document.getElementById('waMsgPreviewBox');
-  if (prevBox) prevBox.textContent = msg;
-};
-
-window.enviarMsgWA = async function() {
-  var c = window._waCliSelecionado;
-  if (!c) return toast('Selecione um cliente!', 'err');
-  var msg = (document.getElementById('waMsgFinal')||{}).value || '';
-  if (!msg) return toast('Selecione um template!', 'err');
-  var num = (c.telefone||'').replace(/\D/g,'');
-  if (!num) return toast('Cliente sem telefone!', 'err');
-  // Tentar via Evolution API
-  if (window._evoConectado && window._evoConfig && window._evoConfig.url) {
-    try {
-      var resp = await fetch(window._evoConfig.url+'/message/sendText/'+window._evoConfig.instance, {
-        method:'POST',
-        headers:{'Content-Type':'application/json','apikey':window._evoConfig.key},
-        body: JSON.stringify({number: (window._evoConfig.ddd||'55')+num, text: msg})
-      });
-      if (resp.ok) {
-        await registrarHistoricoWA(c, msg, 'API');
-        return toast('Mensagem enviada via API!', 'ok');
-      }
-    } catch(e) {}
-  }
-  // Fallback: WhatsApp Web
-  window.open('https://wa.me/55'+num+'?text='+encodeURIComponent(msg), '_blank');
-  await registrarHistoricoWA(c, msg, 'WhatsApp Web');
-};
-
-window.copiarMsgWA = function() {
-  var msg = (document.getElementById('waMsgFinal')||{}).value || '';
-  if (!msg) return toast('Nenhuma mensagem para copiar!', 'warn');
-  navigator.clipboard.writeText(msg).then(function(){ toast('Mensagem copiada!', 'ok'); }).catch(function(){ toast('Erro ao copiar', 'err'); });
-};
-
-window.abrirWAWeb = function() {
-  window.open('https://web.whatsapp.com', '_blank');
-};
-
-window.registrarHistoricoWA = async function(c, mensagem, via) {
-  try {
-    var hist = await dbGet('waHistorico') || [];
-    hist.push({ ts: new Date().toISOString(), cliente: c.nome, telefone: c.telefone, template: 'Manual', mensagem: mensagem, via: via, operador: window._currentAuthUser ? window._currentAuthUser.email : '—' });
-    if (hist.length > 200) hist = hist.slice(-200);
-    await dbSet('waHistorico', hist);
-  } catch(e) {}
-};
 
 </script>
 </body>
