@@ -32,6 +32,7 @@ function toast(msg, type='ok') {
 <script>
   firebase.initializeApp({apiKey:"AIzaSyAdn8IUIWhZUhvHNAg5jEYAPwtCSaQbKA0",authDomain:"gbr-sistemas-saas.firebaseapp.com",databaseURL:"https://gbr-sistemas-saas-default-rtdb.firebaseio.com",projectId:"gbr-sistemas-saas",storageBucket:"gbr-sistemas-saas.firebasestorage.app",messagingSenderId:"329609507285",appId:"1:329609507285:web:d2c1c9ac41e6e8d8e5cd5c"});
   var _fbDB=firebase.database(),_fbAuth=firebase.auth();
+  _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
   window._db=_fbDB;window._auth=_fbAuth;window._firebaseReady=false;
   window._fbRef=function(db,p){return db.ref(p);};
   window._fbSet=function(r,v){return r.set(v);};
@@ -165,9 +166,13 @@ function toast(msg, type='ok') {
 
     }else{
       window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;
-      document.getElementById('loginScreen').style.display='flex';
-      var btn=document.getElementById('btnLogin');
-      if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
+      setTimeout(function(){
+        if(!_fbAuth.currentUser){
+          document.getElementById('loginScreen').style.display='flex';
+          var btn=document.getElementById('btnLogin');
+          if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
+        }
+      },800);
     }
   });
 
