@@ -1200,7 +1200,7 @@ body.light .badge{opacity:.9}
       <button class="ptab" onclick="showAdminTab('menu',this)">☰ Menu</button>
       <button class="ptab" onclick="showAdminTab('empresa',this)">🏢 Empresa</button>
       <button class="ptab" onclick="showAdminTab('integracoes',this)">🔌 Integrações</button>
-      <button class="ptab" onclick="showAdminTab('deploy',this)">🚀 Deploy</button>
+
       <button class="ptab" onclick="showAdminTab('auditoria',this)">🔍 Auditoria</button>
     </div>
 
@@ -1484,62 +1484,7 @@ body.light .badge{opacity:.9}
       </div>
 
 
-      <!-- Segurança Firebase -->
-      <div style="background:rgba(255,82,82,.06);border:1px solid rgba(255,82,82,.2);border-radius:var(--r2);padding:20px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-          <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,82,82,.15);display:flex;align-items:center;justify-content:center;font-size:22px">🔒</div>
-          <div>
-            <div style="font-weight:600;font-size:15px">Segurança — 3 passos obrigatórios</div>
-            <div style="font-size:12px;color:var(--muted2)">Proteja seus dados no Firebase</div>
-          </div>
-          <span class="badge bg-red" style="margin-left:auto">Urgente</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
-            <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">PASSO 1 — Restringir API Key por domínio (Google Cloud)</div>
-            <div style="font-size:12px;color:var(--muted2);line-height:1.6;margin-bottom:8px">Google Cloud Console → Credenciais → sua API Key → Restrições de aplicativo → Referenciadores HTTP → adicione <strong style="color:var(--accent)">gbrsistemassa.github.io/gbr-sistemas/*</strong></div>
-            <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.cloud.google.com/apis/credentials','_blank')">↗ Google Cloud Console</button>
-          </div>
-          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
-            <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">PASSO 2 — Regras do Realtime Database</div>
-            <div style="font-size:12px;color:var(--muted2);margin-bottom:6px">Firebase Console → Realtime Database → Regras → substitua por:</div>
-            <div style="background:var(--surface3);border-radius:6px;padding:10px;font-size:11px;font-family:var(--font-m);color:var(--accent2)">{ "rules": { ".read": "auth != null", ".write": "auth != null" } }</div>
-            <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/database/rules','_blank')">↗ Firebase Rules</button>
-          </div>
-          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
-            <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">PASSO 3 — Autorizar somente seu domínio no Auth</div>
-            <div style="font-size:12px;color:var(--muted2);line-height:1.6;margin-bottom:8px">Firebase → Authentication → Settings → Authorized domains → mantenha apenas <strong style="color:var(--accent)">gbrsistemassa.github.io/gbr-sistemas</strong> e localhost.</div>
-            <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/settings','_blank')">↗ Auth Settings</button>
-          </div>
-        </div>
-      </div>
 
-      <!-- Netlify -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-          <div style="display:flex;align-items:center;gap:12px">
-            <div style="width:40px;height:40px;border-radius:10px;background:rgba(0,194,203,.15);display:flex;align-items:center;justify-content:center;font-size:22px">🌐</div>
-            <div>
-              <div style="font-weight:600;font-size:15px">Netlify — Hospedagem</div>
-              <div style="font-size:12px;color:var(--muted2)">Site: gbrsistemassa.github.io/gbr-sistemas</div>
-            </div>
-          </div>
-          <button class="btn btn-outline btn-sm" onclick="showAdminTab('deploy',document.querySelector('#adminTabs .ptab:nth-child(6)'))">🚀 Ir para Deploy</button>
-        </div>
-        <div class="fgrid c2" style="gap:12px;margin-bottom:12px">
-          <div class="fg"><label>Site ID / URL</label><input id="adm_ntl_site" placeholder="snazzy-moonbeam-7901db" onkeydown="if(event.key==='Enter')document.getElementById('adm_ntl_token').focus()"></div>
-          <div class="fg"><label>Personal Access Token (opcional)</label>
-            <div style="position:relative">
-              <input id="adm_ntl_token" type="password" placeholder="Para deploy automático via API">
-              <button onclick="toggleSenhaVis('adm_ntl_token',this)" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted2);font-size:14px">👁</button>
-            </div>
-          </div>
-        </div>
-        <button class="btn btn-primary" onclick="salvarConfigNetlify()">✓ Salvar</button>
-        <div style="background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.2);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--muted2);margin-top:10px">
-          💡 O Token permite deploy direto pelo sistema. Gere em: <a href="https://app.netlify.com/user/applications#personal-access-tokens" target="_blank" style="color:var(--accent)">Netlify → User Settings → Personal Access Tokens</a>
-        </div>
-      </div>
 
       <!-- ViaCEP -->
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px">
@@ -1552,90 +1497,6 @@ body.light .badge{opacity:.9}
             </div>
           </div>
           <span class="badge bg-green">🟢 Ativo (gratuito)</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB: DEPLOY -->
-    <div id="adminTab-deploy" style="display:none">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-
-        <!-- Deploy Manual -->
-        <div class="admin-card">
-          <div class="admin-card-title">🚀 DEPLOY — NETLIFY DROP</div>
-          <div style="font-size:12px;color:var(--muted2);margin-bottom:16px;line-height:1.7">
-            Baixe o arquivo atualizado do sistema, renomeie para <strong style="color:var(--text)">index.html</strong> e arraste na área abaixo ou no site do Netlify.
-          </div>
-          <!-- Drop zone simulada -->
-          <div id="deployDropZone" style="border:2px dashed var(--border2);border-radius:10px;padding:30px;text-align:center;margin-bottom:14px;transition:all .2s;cursor:pointer" onclick="document.getElementById('deployFileInput').click()" ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(79,195,247,.06)'" ondragleave="this.style.borderColor='var(--border2)';this.style.background=''" ondrop="handleDeployDrop(event)">
-            <div style="font-size:32px;margin-bottom:8px">📁</div>
-            <div style="font-size:13px;color:var(--muted2)">Arraste o <strong style="color:var(--text)">index.html</strong> aqui</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px">ou clique para selecionar</div>
-            <input type="file" id="deployFileInput" accept=".html" style="display:none" onchange="handleDeployFile(this)">
-          </div>
-          <div id="deployFileInfo" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
-            <div style="font-size:12px;color:var(--muted2);margin-bottom:4px">ARQUIVO SELECIONADO</div>
-            <div id="deployFileName" style="font-weight:600"></div>
-            <div id="deployFileSize" style="font-size:12px;color:var(--muted2);margin-top:2px"></div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="executarDeploy()" id="btnDeploy" disabled>🚀 Fazer Deploy</button>
-            <button class="btn btn-ghost" onclick="window.open('https://app.netlify.com/sites/snazzy-moonbeam-7901db/deploys','_blank')">↗ Netlify Dashboard</button>
-          </div>
-          <div id="deployStatus" style="margin-top:12px;font-size:13px"></div>
-        </div>
-
-        <!-- Status e histórico de deploys -->
-        <div class="admin-card">
-          <div class="admin-card-title">📊 STATUS DO SITE</div>
-          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
-            <div class="crow">
-              <div><div style="font-size:13px">Site Netlify</div><div style="font-size:11px;color:var(--muted2)">gbrsistemassa.github.io/gbr-sistemas</div></div>
-              <button class="btn btn-ghost btn-sm" onclick="window.open('https://gbrsistemassa.github.io/gbr-sistemas','_blank')">↗ Abrir</button>
-            </div>
-            <div class="crow">
-              <div><div style="font-size:13px">Firebase Console</div><div style="font-size:11px;color:var(--muted2)">Banco de dados e autenticação</div></div>
-              <button class="btn btn-ghost btn-sm" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas','_blank')">↗ Abrir</button>
-            </div>
-            <div class="crow">
-              <div><div style="font-size:13px">Railway (Evolution API)</div><div style="font-size:11px;color:var(--muted2)">Hospedagem da API WhatsApp</div></div>
-              <button class="btn btn-ghost btn-sm" onclick="window.open('https://railway.app','_blank')">↗ Abrir</button>
-            </div>
-          </div>
-          <div class="admin-card-title" style="font-size:13px;margin-bottom:10px">⚡ AÇÕES RÁPIDAS</div>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <button class="btn btn-ghost" onclick="exportBackup()" style="justify-content:flex-start;gap:10px">💾 Backup completo (JSON)</button>
-            <button class="btn btn-ghost" onclick="exportCSV()" style="justify-content:flex-start;gap:10px">📋 Exportar clientes (CSV)</button>
-            <button class="btn btn-ghost" onclick="baixarSistemaAtualizado()" style="justify-content:flex-start;gap:10px">⬇ Baixar sistema v4 atualizado</button>
-            <button class="btn btn-ghost" onclick="window.open('https://app.netlify.com/sites/snazzy-moonbeam-7901db/deploys','_blank')" style="justify-content:flex-start;gap:10px">📜 Histórico de deploys</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Guia de deploy -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px">
-        <div style="font-family:var(--font-d);font-size:16px;letter-spacing:2px;margin-bottom:14px">📖 COMO FAZER O DEPLOY</div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
-          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
-            <div style="font-size:24px;margin-bottom:8px">⬇</div>
-            <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">PASSO 1</div>
-            <div style="font-size:12px;color:var(--muted2)">Baixe o sistema atualizado pelo botão acima</div>
-          </div>
-          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
-            <div style="font-size:24px;margin-bottom:8px">✏️</div>
-            <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">PASSO 2</div>
-            <div style="font-size:12px;color:var(--muted2)">Renomeie para <strong style="color:var(--text)">index.html</strong></div>
-          </div>
-          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
-            <div style="font-size:24px;margin-bottom:8px">📁</div>
-            <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">PASSO 3</div>
-            <div style="font-size:12px;color:var(--muted2)">Arraste na área acima ou no painel do Netlify</div>
-          </div>
-          <div style="background:rgba(105,240,174,.08);border:1px solid rgba(105,240,174,.25);border-radius:8px;padding:14px;text-align:center">
-            <div style="font-size:24px;margin-bottom:8px">✅</div>
-            <div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:4px">PRONTO!</div>
-            <div style="font-size:12px;color:var(--muted2)">Site atualizado em ~1 minuto. Dados preservados.</div>
-          </div>
         </div>
       </div>
     </div>
@@ -2072,8 +1933,6 @@ body.light .badge{opacity:.9}
       <button class="ptab" onclick="showManualTab('whatsapp',this)">💬 WhatsApp</button>
       <button class="ptab" onclick="showManualTab('admin',this)">🛡 Admin</button>
       <button class="ptab" onclick="showManualTab('pwa',this)">📱 App Mobile</button>
-      <button class="ptab" onclick="showManualTab('problemas',this)">🔧 Problemas</button>
-      <button class="ptab" onclick="showManualTab('seguranca',this)">🔒 Segurança</button>
     </div>
 
     <!-- GERAL -->
@@ -2093,7 +1952,7 @@ body.light .badge{opacity:.9}
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
           <div style="background:var(--surface2);border-radius:8px;padding:12px"><div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px">📋 MÓDULOS DISPONÍVEIS</div><div style="font-size:11px;color:var(--muted2);line-height:1.8">Dashboard em tempo real<br>Cadastro de clientes<br>Agendamentos<br>Agenda geral e semanal<br>Checklist com assinatura<br>Tabela de serviços<br>Caixa do dia<br>Financeiro<br>Relatórios e NPS<br>Estoque (ml/g/unid)<br>Ficha técnica<br>Fidelidade / QR Code<br>WhatsApp automático<br>Painel Admin completo</div></div>
           <div style="background:var(--surface2);border-radius:8px;padding:12px"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px">✅ RECURSOS EXCLUSIVOS</div><div style="font-size:11px;color:var(--muted2);line-height:1.8">Assinatura digital do cliente<br>Fotos do veículo no checklist<br>Cálculo de lucro líquido real<br>Ficha técnica com custo real<br>QR Code de fidelidade<br>Backup automático semanal<br>Comparativo mensal<br>Visão semanal da agenda<br>Temas e cores personalizáveis<br>Instalar como app (PWA)<br>Notificações push<br>Controle de acesso por nível<br>Log de auditoria completo</div></div>
-          <div style="background:var(--surface2);border-radius:8px;padding:12px"><div style="font-size:11px;font-weight:700;color:var(--yellow);margin-bottom:6px">⚡ ATALHOS DO TECLADO</div><div style="font-size:11px;color:var(--muted2);line-height:1.8"><strong style="color:var(--text)">Ctrl+K</strong> — Busca global<br><strong style="color:var(--text)">Enter</strong> — Confirmar login<br><strong style="color:var(--text)">Esc</strong> — Fechar busca<br><strong style="color:var(--text)">F12</strong> — Console do navegador</div></div>
+          <div style="background:var(--surface2);border-radius:8px;padding:12px"><div style="font-size:11px;font-weight:700;color:var(--yellow);margin-bottom:6px">⚡ ATALHOS DO TECLADO</div><div style="font-size:11px;color:var(--muted2);line-height:1.8"><strong style="color:var(--text)">Ctrl+K</strong> — Busca global<br><strong style="color:var(--text)">Enter</strong> — Confirmar login<br><strong style="color:var(--text)">Esc</strong> — Fechar busca<br></div></div>
         </div>
       </div>
 
@@ -2105,26 +1964,10 @@ body.light .badge{opacity:.9}
             <strong style="color:var(--text)">2. Login:</strong> Digite e-mail e senha → clique ▶ Entrar (ou pressione Enter)<br>
             <strong style="color:var(--text)">3. Indicador de conexão:</strong> 🟢 Sincronizado = Firebase online · 🔴 = offline<br>
             <strong style="color:var(--text)">4. Sair:</strong> Clique em "Sair" no canto superior direito<br>
-            <strong style="color:var(--text)">5. Criar usuários:</strong> Firebase Console → Authentication → Users → Add User
-          </div>
-          <div style="background:rgba(255,82,82,.06);border:1px solid rgba(255,82,82,.2);border-radius:8px;padding:12px;font-size:12px;color:var(--muted2)">
-            ⚠️ <strong style="color:var(--red)">Se o login não funcionar:</strong> Verifique se o domínio está autorizado em Firebase → Authentication → Settings → Authorized Domains → deve conter <strong>gbrsistemassa.github.io</strong>
-          </div>
-        </div>
-      </div>
 
-      <div class="admin-card" style="margin-top:14px">
-        <div class="admin-card-title">🚀 COMO ATUALIZAR O SISTEMA</div>
-        <div style="font-size:12px;color:var(--muted2);line-height:2">
-          <strong style="color:var(--text)">1.</strong> Receba o novo <strong>index.html</strong> atualizado<br>
-          <strong style="color:var(--text)">2.</strong> Acesse <strong style="color:var(--accent)">github.com/GBRsistemassa/gbr-sistemas</strong><br>
-          <strong style="color:var(--text)">3.</strong> Clique em <strong>Add file → Upload files</strong><br>
-          <strong style="color:var(--text)">4.</strong> Arraste o novo index.html → clique <strong>Commit changes</strong><br>
-          <strong style="color:var(--text)">5.</strong> Aguarde 2-3 minutos → acesse o site normalmente<br>
-          <strong style="color:var(--accent)">✅ Seus dados no Firebase NÃO são afetados pela atualização</strong>
+          </div>
         </div>
       </div>
-    </div>
 
     <!-- CLIENTES -->
     <div id="manualTab-clientes" style="display:none">
@@ -2455,151 +2298,7 @@ body.light .badge{opacity:.9}
     </div>
 
     <!-- PROBLEMAS -->
-    <div id="manualTab-problemas" style="display:none">
-      <div class="admin-card">
-        <div class="admin-card-title">🔧 SOLUÇÃO DE PROBLEMAS COMUNS</div>
-        <div style="display:flex;flex-direction:column;gap:12px;font-size:12px">
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--red);margin-bottom:6px">❌ Login não funciona / "firebase is not defined"</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              1. Verifique sua conexão com a internet<br>
-              2. Firebase Console → Authentication → Settings → Authorized Domains → confirme que <strong style="color:var(--text)">gbrsistemassa.github.io</strong> está na lista<br>
-              3. Se não estiver → clique "Add domain" e adicione<br>
-              4. Tente em modo aba anônima (Ctrl+Shift+N)
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--red);margin-bottom:6px">❌ Botões não funcionam / páginas não carregam dados</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              1. Pressione F12 → aba Console → veja se há erro em vermelho<br>
-              2. Firebase Console → Realtime Database → Rules → confirme que as regras estão com <strong style="color:var(--text)">"auth != null"</strong><br>
-              3. Se as regras estiverem com <strong style="color:var(--red)">"false"</strong>, substitua por: <br>
-              <code style="background:var(--surface);padding:4px 8px;border-radius:4px;color:var(--accent)">{ "rules": { ".read": "auth != null", ".write": "auth != null" } }</code><br>
-              4. Clique Publish → tente novamente
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--red);margin-bottom:6px">❌ WhatsApp não conecta / erro 404 na API</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              O servidor no Render.com dorme após 15min sem uso.<br>
-              1. WhatsApp → aba API → clique ⏰ Acordar → aguarde 30-60 segundos<br>
-              2. Clique 🔌 Testar Conexão novamente<br>
-              3. Se aparecer 🟢 → está pronto<br>
-              4. Se ainda der erro → acesse <strong style="color:var(--text)">dashboard.render.com</strong> → gbr-evolution → clique "Manual Deploy"<br>
-              5. Se o número desconectou → clique 📱 Conectar QR Code → escaneie com o celular
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--red);margin-bottom:6px">❌ Site desatualizado / mudanças não aparecem</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              O GitHub Pages pode demorar 2-5 minutos para atualizar.<br>
-              1. Aguarde alguns minutos e atualize a página (Ctrl+F5 ou Ctrl+Shift+R)<br>
-              2. Tente em uma aba anônima (sem cache)<br>
-              3. Verifique em github.com/GBRsistemassa/gbr-sistemas → aba Actions → confirme que o deploy foi concluído (ícone verde ✓)
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--red);margin-bottom:6px">❌ Dados somem / banco de dados não salva</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              1. Verifique o indicador 🟢/🔴 no topo — se estiver vermelho está sem internet<br>
-              2. Firebase Console → Realtime Database → verifique se o plano Spark ainda está ativo (gratuito)<br>
-              3. Verifique as regras do banco (item acima)<br>
-              4. Faça um backup manual: Admin → Backup → 💾 Fazer Backup Agora
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--red);margin-bottom:6px">❌ Página não rola / botão de salvar não aparece</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              1. Role a tela para baixo dentro do painel central<br>
-              2. Em celular: role com o dedo dentro da área de conteúdo (não pela borda da tela)<br>
-              3. Se o conteúdo ainda cortar, pressione Ctrl+Shift+R para forçar atualização completa
-            </div>
-          </div>
-
         </div>
-      </div>
-      <div class="admin-card" style="margin-top:14px">
-        <div class="admin-card-title">📋 VARIÁVEIS DE AMBIENTE — Evolution API (Render.com)</div>
-        <div style="font-size:12px;color:var(--muted2);line-height:2">
-          Se o WhatsApp parar de funcionar, acesse <strong style="color:var(--text)">dashboard.render.com → gbr-evolution → Environment</strong> e confirme estas variáveis:<br>
-          <code style="display:block;background:var(--surface);padding:10px;border-radius:8px;margin-top:8px;color:var(--accent);line-height:2">
-            AUTHENTICATION_API_KEY = gbrsistemas2025<br>
-            AUTHENTICATION_TYPE = apikey<br>
-            PORT = 8080<br>
-            SERVER_TYPE = http<br>
-            LOG_LEVEL = ERROR<br>
-            STORE_MESSAGES = true<br>
-            STORE_CONTACTS = true<br>
-            DELETE_INSTANCE = false<br>
-            LANGUAGE = pt-BR
-          </code>
-        </div>
-      </div>
-    </div>
-
-    <!-- SEGURANÇA -->
-    <div id="manualTab-seguranca" style="display:none">
-      <div class="admin-card">
-        <div class="admin-card-title">🔒 CONFIGURAÇÃO DE SEGURANÇA COMPLETA</div>
-        <div style="display:flex;flex-direction:column;gap:12px;font-size:12px">
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--text);margin-bottom:6px">PASSO 1 — Regras do Firebase Database</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              <a href="https://console.firebase.google.com/project/gbr-sistemas-saas/database/rules" target="_blank" style="color:var(--accent)">↗ Abrir Firebase Rules</a><br>
-              Substitua o conteúdo por:<br>
-              <code style="display:block;background:var(--surface);padding:8px;border-radius:6px;margin-top:6px;color:var(--accent)">{"rules":{".read":"auth != null",".write":"auth != null"}}</code><br>
-              → Clique <strong>Publish</strong>
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--text);margin-bottom:6px">PASSO 2 — Domínios Autorizados</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              <a href="https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/settings" target="_blank" style="color:var(--accent)">↗ Abrir Auth Settings</a><br>
-              Em "Authorized Domains" confirme que estão presentes:<br>
-              • <strong style="color:var(--text)">gbrsistemassa.github.io</strong><br>
-              • <strong style="color:var(--text)">localhost</strong> (para testes locais)<br>
-              • <strong style="color:var(--text)">gbr-sistemas-saas.firebaseapp.com</strong>
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--text);margin-bottom:6px">PASSO 3 — Restringir API Key (opcional mas recomendado)</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--accent)">↗ Abrir Google Cloud Credentials</a><br>
-              Clique na sua API Key → Restrições de aplicativo → Referenciadores HTTP → adicione:<br>
-              <code style="background:var(--surface);padding:4px 8px;border-radius:4px;color:var(--accent)">gbrsistemassa.github.io/*</code>
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--text);margin-bottom:6px">PASSO 4 — Senha ADM e PIN</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              • Admin → Regras → configure senha ADM para aprovação de descontos acima do limite<br>
-              • Admin → WhatsApp → Avançado → configure PIN de 4-8 dígitos para exclusões e reset<br>
-              • Admin → Segurança → Alterar Senha ADM para senha segura (letras + números + símbolos)
-            </div>
-          </div>
-
-          <div style="background:var(--surface2);border-radius:8px;padding:12px">
-            <div style="font-weight:700;color:var(--text);margin-bottom:6px">PASSO 5 — Backup Regular</div>
-            <div style="color:var(--muted2);line-height:1.8">
-              • Admin → Backup → ative o toggle "Backup automático semanal"<br>
-              • Faça um backup manual agora: Admin → Backup → 💾 Fazer Backup Agora<br>
-              • Periodicamente: Admin → Backup → ↓ Exportar JSON Local (salva no seu computador)
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </div>
 
   </div>
 
@@ -4586,7 +4285,7 @@ async function carregarIntegracoes(){
   set('adm_fb_auth',fbCfg.auth);set('adm_fb_key',fbCfg.key);
   // Netlify
   const ntlCfg=await dbGet('netlifyConfig')||{};
-  set('adm_ntl_site',ntlCfg.site||'snazzy-moonbeam-7901db');
+  set('adm_ntl_site',ntlCfg.site||'');
   set('adm_ntl_token',ntlCfg.token||'');
   // Status Evolution
   const statusEl=document.getElementById('evoStatusAdmin');
@@ -4694,7 +4393,7 @@ async function executarDeploy(){
   if(!_deployFile)return toast('Selecione um arquivo primeiro!','err');
   const ntlCfg=await dbGet('netlifyConfig')||{};
   const token=ntlCfg.token||'';
-  const siteId=ntlCfg.site||'snazzy-moonbeam-7901db';
+  const siteId=ntlCfg.site||'';
   const statusEl=document.getElementById('deployStatus');
   if(!token){
     // Sem token: redirecionar para Netlify Drop com instruções
