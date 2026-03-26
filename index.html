@@ -134,11 +134,27 @@ function toast(msg, type='ok') {
         }
       } catch(e){}
 
-      // 8. Carregar modulos autorizados
+      // 8. Carregar modulos do plano contratado
       try {
-        var snapMods=await _fbDB.ref('tenants/'+window._tenantId+'/modules').once('value');
-        window._enabledModules=snapMods.val()||{};
-      } catch(e){window._enabledModules={};}
+        var planoAtual=(lic.plano||'basico').toLowerCase();
+        window._planoAtual=planoAtual;
+        var snapPlano=await _fbDB.ref('planos/'+planoAtual+'/modulos').once('value');
+        var modPlano=snapPlano.val();
+        if(modPlano&&Object.keys(modPlano).length>0){
+          window._enabledModules=modPlano;
+        } else {
+          var snapMods=await _fbDB.ref('tenants/'+window._tenantId+'/modules').once('value');
+          window._enabledModules=snapMods.val()||{};
+        }
+        setTimeout(function(){
+          var badgePlano=document.getElementById('planoBadge');
+          if(badgePlano){
+            var labels={trial:'TRIAL',basico:'BÁSICO',profissional:'PRO',premium:'PREMIUM'};
+            badgePlano.textContent=labels[planoAtual]||planoAtual.toUpperCase();
+            badgePlano.style.display='inline-block';
+          }
+        },500);
+      } catch(e){window._enabledModules={};window._planoAtual='basico';}
 
       // 9. Notificacoes do Super Admin
       setTimeout(verificarNotificacoesGlobais,3000);
@@ -560,6 +576,7 @@ body.light .badge{opacity:.9}
     <div class="user-chip">
       <div class="ua" id="userAv">?</div>
       <span id="userNm">—</span>
+      <span id="planoBadge" style="display:none;font-size:9px;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(79,195,247,.15);color:var(--accent);border:1px solid rgba(79,195,247,.3);margin-left:4px;letter-spacing:.5px"></span>
     </div>
     <button class="btn btn-ghost btn-sm" onclick="window.logout()">Sair</button>
     <button id="menuToggle" onclick="toggleMobileMenu()">☰</button>
@@ -599,23 +616,23 @@ body.light .badge{opacity:.9}
   <div class="ns">Clientes</div>
   <div class="ni" onclick="goTo('cadastro')"><span class="ico">＋</span>Cadastro</div>
   <div class="ni" onclick="goTo('banco')"><span class="ico">◫</span>Banco de Dados</div>
-  <div class="ni" onclick="goTo('fidelidade')"><span class="ico">★</span>Fidelidade</div>
+  <div class="ni" data-modulo="fidelidade" onclick="goTo('fidelidade')"><span class="ico">★</span>Fidelidade</div>
   <div class="ns">Operação</div>
   <div class="ni" onclick="goTo('agendamento')"><span class="ico">◎</span>Agendamento</div>
   <div class="ni" onclick="goTo('agenda')"><span class="ico">▦</span>Agenda Geral</div>
   <div class="ni" onclick="goTo('checklist')"><span class="ico">✓</span>Checklist <span class="nbadge nb-red" id="navCL" style="display:none">!</span></div>
-  <div class="ni" onclick="goTo('servicos')"><span class="ico">◈</span>Serviços</div>
+  <div class="ni" data-modulo="servicos" onclick="goTo('servicos')"><span class="ico">◈</span>Serviços</div>
   <div class="ns">Financeiro</div>
   <div class="ni" onclick="goTo('caixa')"><span class="ico">💵</span>Caixa do Dia <span class="nbadge nb-green" id="navCaixa" style="display:none">●</span></div>
-  <div class="ni" onclick="goTo('financeiro')"><span class="ico">◐</span>Financeiro</div>
-  <div class="ni" onclick="goTo('relatorios')"><span class="ico">📊</span>Relatórios</div>
+  <div class="ni" data-modulo="financeiro" onclick="goTo('financeiro')"><span class="ico">◐</span>Financeiro</div>
+  <div class="ni" data-modulo="relatorios" onclick="goTo('relatorios')"><span class="ico">📊</span>Relatórios</div>
   <div class="ns">Gestão</div>
-  <div class="ni" onclick="goTo('estoque')"><span class="ico">◻</span>Estoque</div>
-  <div class="ni" onclick="goTo('fichatecnica')"><span class="ico">🧮</span>Ficha Técnica</div>
+  <div class="ni" data-modulo="estoque" onclick="goTo('estoque')"><span class="ico">◻</span>Estoque</div>
+  <div class="ni" data-modulo="fichatecnica" onclick="goTo('fichatecnica')"><span class="ico">🧮</span>Ficha Técnica</div>
   <div class="ns" id="adminSection" style="display:none">Admin</div>
   <div class="ni" id="adminMenuItem" style="display:none" onclick="goTo('admin')"><span class="ico">🛡</span>Painel Admin</div>
   <div class="ns">Sistema</div>
-  <div class="ni" onclick="goTo('whatsapp')"><span class="ico">💬</span>WhatsApp</div>
+  <div class="ni" data-modulo="whatsapp" onclick="goTo('whatsapp')"><span class="ico">💬</span>WhatsApp</div>
   <div class="ni" onclick="goTo('manual')"><span class="ico">📖</span>Manual</div>
 </div>
 
@@ -5644,7 +5661,51 @@ if (_origExportBackup2) {
 // Carregar role apos login
 window.addEventListener('firebaseReady', function() {
   carregarRoleUsuario();
+  aplicarRestricaoPlano();
 }, { once: true });
+
+// ============================================================
+// RESTRICAO DE MODULOS POR PLANO
+// ============================================================
+var PAGE_MODULO_MAP = {
+  fidelidade:'fidelidade', financeiro:'financeiro', relatorios:'relatorios',
+  estoque:'estoque', fichatecnica:'fichatecnica', whatsapp:'whatsapp', servicos:'servicos'
+};
+
+function aplicarRestricaoPlano() {
+  var mods = window._enabledModules || {};
+  if (Object.keys(mods).length === 0) return;
+  document.querySelectorAll('.ni[data-modulo]').forEach(function(el) {
+    var mod = el.getAttribute('data-modulo');
+    if (mods[mod] === false) {
+      el.style.opacity = '0.4';
+      el.style.cursor = 'not-allowed';
+      el.title = 'Módulo não disponível no plano atual';
+      var lock = document.createElement('span');
+      lock.textContent = ' 🔒';
+      lock.style.fontSize = '10px';
+      if (!el.querySelector('.lock-icon')) {
+        lock.className = 'lock-icon';
+        el.appendChild(lock);
+      }
+    }
+  });
+}
+
+// Interceptor goTo para bloqueio por plano
+var _goToOrigMod = goTo;
+goTo = function(page) {
+  var mods = window._enabledModules || {};
+  if (Object.keys(mods).length > 0) {
+    var mod = PAGE_MODULO_MAP[page];
+    if (mod && mods[mod] === false) {
+      var plano = window._planoAtual || 'atual';
+      toast('Módulo não disponível no plano ' + plano.toUpperCase() + '. Fale com o suporte para fazer upgrade.', 'warn');
+      return;
+    }
+  }
+  _goToOrigMod(page);
+};
 
 // ===== TEMAS =====
 var TEMAS={dark:{accent:'#4fc3f7',accent2:'#ff7043',bg:'#07080f',surface:'#0f1018',surface2:'#161820',text:'#e8eaf6',green:'#69f0ae',red:'#ff5252',border:'#252738'},blue:{accent:'#2196F3',accent2:'#FF5722',bg:'#0a0e1a',surface:'#0f1526',surface2:'#162030',text:'#e8eaf6',green:'#4CAF50',red:'#f44336',border:'#1a2540'},green:{accent:'#4CAF50',accent2:'#FF9800',bg:'#071a0a',surface:'#0f1f0f',surface2:'#162616',text:'#e8eaf6',green:'#69f0ae',red:'#ff5252',border:'#1a3020'},purple:{accent:'#9C27B0',accent2:'#FF4081',bg:'#0f0a1a',surface:'#180f26',surface2:'#221630',text:'#e8eaf6',green:'#69f0ae',red:'#ff5252',border:'#2a1540'},'light-clean':{accent:'#1976D2',accent2:'#E53935',bg:'#f5f7fa',surface:'#ffffff',surface2:'#f0f2f5',text:'#1a1d2e',green:'#2E7D32',red:'#C62828',border:'#dde1e9'}};
