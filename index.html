@@ -99,16 +99,41 @@ function toast(msg, type='ok') {
       if(lic.expiracao){
         var agora=new Date();
         var expDate=new Date(lic.expiracao);
+        var isTrial=(lic.plano||'').toLowerCase()==='trial';
         if(agora>expDate){
           document.getElementById('loginScreen').style.display='none';
           var lock=document.getElementById('lockScreen');
           lock.style.display='flex';
-          document.getElementById('lockMsg').textContent='Sua licenca expirou em '+expDate.toLocaleDateString('pt-BR')+'. Entre em contato para renovar.';
+          if(isTrial){
+            document.getElementById('lockTitle').textContent='PERÍODO DE TESTE ENCERRADO';
+            document.getElementById('lockIcon').textContent='⏳';
+            document.getElementById('lockMsg').textContent='Seu período de teste gratuito encerrou em '+expDate.toLocaleDateString('pt-BR')+'. Assine um plano para continuar usando o sistema.';
+          } else {
+            document.getElementById('lockMsg').textContent='Sua licenca expirou em '+expDate.toLocaleDateString('pt-BR')+'. Entre em contato para renovar.';
+          }
           carregarSuporteLink();
           return;
         }
         var diffDias=Math.floor((expDate-agora)/86400000);
-        if(diffDias<=7){
+        window._trialDiasRestantes = isTrial ? diffDias : null;
+        if(isTrial){
+          setTimeout(function(){
+            var banner=document.getElementById('trialBanner');
+            var bannerMsg=document.getElementById('trialBannerMsg');
+            if(banner&&bannerMsg){
+              bannerMsg.textContent='Período de teste: '+diffDias+' dia(s) restante'+(diffDias===1?'':'s');
+              banner.style.display='block';
+              // empurrar topbar para baixo
+              var tb=document.getElementById('topbar');
+              if(tb) tb.style.top='30px';
+              var sd=document.getElementById('sidebar');
+              if(sd) sd.style.top='calc(56px + 30px)';
+            }
+          },1000);
+          if(diffDias<=3){
+            setTimeout(function(){toast('⚠️ Seu trial expira em '+diffDias+' dia(s)! Entre em contato para assinar.','warn');},5000);
+          }
+        } else if(diffDias<=7){
           setTimeout(function(){toast('Sua licenca expira em '+diffDias+' dia(s). Renove para nao perder o acesso.','warn');},4000);
         }
       }
@@ -152,6 +177,15 @@ function toast(msg, type='ok') {
             var labels={trial:'TRIAL',basico:'BÁSICO',profissional:'PRO',premium:'PREMIUM'};
             badgePlano.textContent=labels[planoAtual]||planoAtual.toUpperCase();
             badgePlano.style.display='inline-block';
+            if(planoAtual==='trial'){
+              badgePlano.style.background='rgba(255,143,0,.2)';
+              badgePlano.style.color='#ff8f00';
+              badgePlano.style.borderColor='rgba(255,143,0,.4)';
+            } else if(planoAtual==='premium'){
+              badgePlano.style.background='rgba(255,215,0,.15)';
+              badgePlano.style.color='#ffd700';
+              badgePlano.style.borderColor='rgba(255,215,0,.35)';
+            }
           }
         },500);
       } catch(e){window._enabledModules={};window._planoAtual='basico';}
@@ -537,7 +571,8 @@ body.light .badge{opacity:.9}
 
 <!-- TELA DE BLOQUEIO GBR -->
 <div id="lockScreen" style="display:none;position:fixed;inset:0;background:#07080f;z-index:99999;align-items:center;justify-content:center;flex-direction:column;gap:16px">
-  <div style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:#ff5252;letter-spacing:4px">ACESSO SUSPENSO</div>
+  <div id="lockIcon" style="font-size:56px">🔒</div>
+  <div id="lockTitle" style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:#ff5252;letter-spacing:4px">ACESSO SUSPENSO</div>
   <div style="color:#8b90b0;font-size:14px;text-align:center;max-width:400px" id="lockMsg">
     Sua assinatura está bloqueada. Entre em contato com o suporte GBR Sistemas.
   </div>
@@ -549,6 +584,38 @@ body.light .badge{opacity:.9}
     style="background:transparent;border:1px solid #313450;color:#8b90b0;padding:8px 20px;border-radius:8px;cursor:pointer;margin-top:4px">
     Sair
   </button>
+</div>
+
+<!-- MODAL DE UPGRADE DE PLANO -->
+<div class="mbg" id="modalUpgrade">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">⚡ FAZER UPGRADE</div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="font-size:10px;letter-spacing:1px;color:var(--muted2);margin-bottom:4px">MÓDULO BLOQUEADO</div>
+      <div id="upgradeModuloNome" style="font-weight:700;font-size:15px;color:var(--accent)"></div>
+      <div style="font-size:12px;color:var(--muted2);margin-top:4px">Este recurso não está disponível no seu plano atual.</div>
+    </div>
+    <div style="font-size:10px;letter-spacing:1px;color:var(--muted2);margin-bottom:10px">PLANOS DISPONÍVEIS</div>
+    <div id="upgradePlanosLista" style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+      <div style="text-align:center;color:var(--muted2);font-size:12px;padding:16px">Carregando planos...</div>
+    </div>
+    <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center;font-size:12px;color:var(--muted2)">
+      Para fazer upgrade, entre em contato com o suporte GBR Sistemas.
+    </div>
+    <div class="mfoot">
+      <button class="btn btn-ghost" onclick="fecharUpgrade()">Fechar</button>
+      <a id="upgradeSuporteBtn" href="#" target="_blank" class="btn btn-primary" style="text-decoration:none">
+        💬 Falar com Suporte
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- BANNER DE TRIAL -->
+<div id="trialBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9000;background:linear-gradient(135deg,#ff8f00,#f57c00);color:#fff;text-align:center;padding:6px 16px;font-size:12px;font-weight:600;letter-spacing:.3px">
+  <span id="trialBannerMsg"></span>
+  &nbsp;·&nbsp;
+  <a id="trialBannerLink" href="#" target="_blank" style="color:#fff;text-decoration:underline">Falar com Suporte</a>
 </div>
 
 <!-- LOGIN -->
@@ -5699,13 +5766,69 @@ goTo = function(page) {
   if (Object.keys(mods).length > 0) {
     var mod = PAGE_MODULO_MAP[page];
     if (mod && mods[mod] === false) {
-      var plano = window._planoAtual || 'atual';
-      toast('Módulo não disponível no plano ' + plano.toUpperCase() + '. Fale com o suporte para fazer upgrade.', 'warn');
+      abrirModalUpgrade(mod);
       return;
     }
   }
   _goToOrigMod(page);
 };
+
+// ============================================================
+// MODAL DE UPGRADE
+// ============================================================
+var _MODULO_LABELS = {
+  fidelidade:'Programa de Fidelidade', financeiro:'Financeiro Completo',
+  relatorios:'Relatórios', estoque:'Estoque', fichatecnica:'Ficha Técnica',
+  whatsapp:'WhatsApp Automático', servicos:'Serviços Ilimitados'
+};
+
+function abrirModalUpgrade(moduloBloqueado) {
+  var el = document.getElementById('upgradeModuloNome');
+  if (el) el.textContent = _MODULO_LABELS[moduloBloqueado] || moduloBloqueado;
+  var lista = document.getElementById('upgradePlanosLista');
+  if (lista) {
+    lista.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:12px;padding:16px">Carregando planos...</div>';
+    _fbDB.ref('planos').once('value').then(function(snap) {
+      var planos = snap.val() || {};
+      var planoAtual = window._planoAtual || '';
+      var ordem = ['basico','profissional','premium'];
+      var html = ordem.filter(function(k) { return planos[k]; }).map(function(k) {
+        var p = planos[k];
+        var mods = p.modulos || {};
+        var temMod = mods[moduloBloqueado] !== false;
+        var isAtual = k === planoAtual;
+        var precoStr = p.preco > 0 ? 'R$ ' + parseFloat(p.preco).toFixed(2).replace('.',',') + '/mês' : 'Gratuito';
+        var borderColor = isAtual ? 'var(--accent)' : (temMod ? 'var(--green)' : 'var(--border)');
+        var badgeHtml = isAtual
+          ? '<span style="font-size:10px;background:rgba(79,195,247,.15);color:var(--accent);padding:2px 7px;border-radius:10px;border:1px solid rgba(79,195,247,.3)">ATUAL</span>'
+          : (temMod ? '<span style="font-size:10px;background:rgba(105,240,174,.15);color:var(--green);padding:2px 7px;border-radius:10px;border:1px solid rgba(105,240,174,.3)">✓ Inclui este módulo</span>' : '');
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1px solid '+borderColor+';border-radius:10px;opacity:'+(temMod||isAtual?'1':'0.45')+'">'
+          +'<div><div style="font-weight:600;font-size:14px">'+p.nome+'</div>'
+          +'<div style="font-size:11px;color:var(--muted2);margin-top:2px">até '+(p.colaboradores_max||1)+' colaborador(es)</div></div>'
+          +'<div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:5px">'
+          +'<div style="font-weight:700;font-size:15px;color:var(--accent)">'+precoStr+'</div>'
+          +badgeHtml+'</div></div>';
+      }).join('');
+      lista.innerHTML = html || '<div style="color:var(--muted2);font-size:12px">Nenhum plano encontrado.</div>';
+    }).catch(function() {
+      lista.innerHTML = '<div style="color:var(--muted2);font-size:12px">Erro ao carregar planos.</div>';
+    });
+  }
+  _fbDB.ref('core_settings/style').once('value').then(function(s) {
+    var cfg = s.val() || {};
+    var btn = document.getElementById('upgradeSuporteBtn');
+    var bannerLink = document.getElementById('trialBannerLink');
+    if (cfg.suporte) {
+      if (btn) btn.href = cfg.suporte;
+      if (bannerLink) bannerLink.href = cfg.suporte;
+    }
+  });
+  document.getElementById('modalUpgrade').classList.add('open');
+}
+
+function fecharUpgrade() {
+  document.getElementById('modalUpgrade').classList.remove('open');
+}
 
 // ===== TEMAS =====
 var TEMAS={dark:{accent:'#4fc3f7',accent2:'#ff7043',bg:'#07080f',surface:'#0f1018',surface2:'#161820',text:'#e8eaf6',green:'#69f0ae',red:'#ff5252',border:'#252738'},blue:{accent:'#2196F3',accent2:'#FF5722',bg:'#0a0e1a',surface:'#0f1526',surface2:'#162030',text:'#e8eaf6',green:'#4CAF50',red:'#f44336',border:'#1a2540'},green:{accent:'#4CAF50',accent2:'#FF9800',bg:'#071a0a',surface:'#0f1f0f',surface2:'#162616',text:'#e8eaf6',green:'#69f0ae',red:'#ff5252',border:'#1a3020'},purple:{accent:'#9C27B0',accent2:'#FF4081',bg:'#0f0a1a',surface:'#180f26',surface2:'#221630',text:'#e8eaf6',green:'#69f0ae',red:'#ff5252',border:'#2a1540'},'light-clean':{accent:'#1976D2',accent2:'#E53935',bg:'#f5f7fa',surface:'#ffffff',surface2:'#f0f2f5',text:'#1a1d2e',green:'#2E7D32',red:'#C62828',border:'#dde1e9'}};
