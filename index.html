@@ -40,20 +40,22 @@ function toast(msg, type='ok') {
   window._fbRemove=function(r){return r.remove();};
   window._fbUpdate=function(r,v){return r.update(v);};
   window._fbOnValue=function(r,cb){r.on('value',function(s){cb(s);});};
+
   window.doLogin=async function(){
     var e=document.getElementById('loginEmail').value.trim();
     var p=document.getElementById('loginPass').value;
     if(!e||!p)return toast('Preencha e-mail e senha','err');
     var btn=document.getElementById('btnLogin');btn.disabled=true;btn.textContent='Aguarde...';
     try{await _fbAuth.signInWithEmailAndPassword(e,p);}
-    catch(err){toast('E-mail ou senha incorretos','err');btn.disabled=false;btn.textContent='&#9658; Entrar';}
+    catch(err){toast('E-mail ou senha incorretos','err');btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
   };
+
   _fbAuth.onAuthStateChanged(async function(user){
     if(user){
       window._currentAuthUser=user;window._firebaseReady=true;
 
-      // 1. Carregar tenant do usuário
-      var emailKey=user.email.replace(/\./g,'_').replace(/@/g,'__at__');
+      // 1. Identificar tenant do usuario
+      var emailKey=user.email.replace(/\./g,'_').replace(/@/g,'__');
       var snapTenant=await _fbDB.ref('userTenants/'+emailKey).once('value');
       var tenantData=snapTenant.val();
 
@@ -61,49 +63,56 @@ function toast(msg, type='ok') {
         document.getElementById('loginScreen').style.display='none';
         var lock=document.getElementById('lockScreen');
         lock.style.display='flex';
-        document.getElementById('lockMsg').textContent='Este acesso é para usuários cadastrados em uma estética. Se você é o Super Admin, acesse o console GBR.';
+        document.getElementById('lockMsg').textContent='Usuario nao vinculado a nenhuma estetica. Contate o administrador.';
         return;
       }
 
       window._tenantId=tenantData.tenantId;
       window._userRole=tenantData.role;
 
-      // 2. Verificar assinatura
-      var snapAss=await _fbDB.ref('tenants/'+window._tenantId+'/assinatura').once('value');
-      var ass=snapAss.val()||{};
+      // 2. Ler licenca do tenant (caminho: tenants/{id}/licenca)
+      var snapLic=await _fbDB.ref('tenants/'+window._tenantId+'/licenca').once('value');
+      var lic=snapLic.val()||{};
 
-      if(ass.status==='bloqueado'){
+      // 3. KILL SWITCH — sobrepoe TUDO
+      if(lic.killSwitch===true){
         document.getElementById('loginScreen').style.display='none';
         var lock=document.getElementById('lockScreen');
         lock.style.display='flex';
-        document.getElementById('lockMsg').textContent='Assinatura bloqueada. Plano: '+(ass.plano||'—')+'. Contato: suporte@gbrsistemas.com.br';
-        var snapCfg=await _fbDB.ref('globalConfig/style').once('value');
-        var cfg=snapCfg.val()||{};
-        if(cfg.suporte)document.getElementById('lockWhats').href=cfg.suporte;
+        document.getElementById('lockMsg').textContent='Acesso bloqueado pelo administrador. Plano: '+(lic.plano||'--')+'. Entre em contato para regularizar.';
+        carregarSuporteLink();
         return;
       }
 
-      if(ass.status==='pendente'){
-        setTimeout(function(){toast('⚠ Atenção: sua assinatura está pendente de pagamento. Regularize para evitar bloqueio.','warn');},3000);
+      // 4. Status inativo
+      if(lic.status==='inativo'){
+        document.getElementById('loginScreen').style.display='none';
+        var lock=document.getElementById('lockScreen');
+        lock.style.display='flex';
+        document.getElementById('lockMsg').textContent='Licenca inativa. Plano: '+(lic.plano||'--')+'. Entre em contato para reativar.';
+        carregarSuporteLink();
+        return;
       }
 
-      // 3. Verificar expiração
-      if(ass.expiracao){
-        var hoje=new Date();
-        var exp=new Date(ass.expiracao+'T23:59:59');
-        if(hoje>exp){
-          await _fbDB.ref('tenants/'+window._tenantId+'/assinatura').update({status:'bloqueado',bloqueadoEm:new Date().toISOString(),motivoBloqueio:'Assinatura expirada em '+ass.expiracao});
+      // 5. Verificar expiracao manual (data definida pelo Super Admin)
+      if(lic.expiracao){
+        var agora=new Date();
+        var expDate=new Date(lic.expiracao);
+        if(agora>expDate){
           document.getElementById('loginScreen').style.display='none';
           var lock=document.getElementById('lockScreen');
           lock.style.display='flex';
-          document.getElementById('lockMsg').textContent='Sua assinatura expirou em '+new Date(ass.expiracao+'T12:00:00').toLocaleDateString('pt-BR')+'. Entre em contato para renovar.';
+          document.getElementById('lockMsg').textContent='Sua licenca expirou em '+expDate.toLocaleDateString('pt-BR')+'. Entre em contato para renovar.';
+          carregarSuporteLink();
           return;
         }
-        var diff=Math.floor((exp-hoje)/86400000);
-        if(diff<=7){setTimeout(function(){toast('⏰ Sua assinatura expira em '+diff+' dias. Renove para não perder o acesso.','warn');},4000);}
+        var diffDias=Math.floor((expDate-agora)/86400000);
+        if(diffDias<=7){
+          setTimeout(function(){toast('Sua licenca expira em '+diffDias+' dia(s). Renove para nao perder o acesso.','warn');},4000);
+        }
       }
 
-      // 4. Tudo OK — mostrar o sistema
+      // 6. TUDO OK — Liberar sistema
       document.getElementById('loginScreen').style.display='none';
       var nick=user.email.split('@')[0];
       document.getElementById('userNm').textContent=nick.toUpperCase();
@@ -111,23 +120,47 @@ function toast(msg, type='ok') {
       document.getElementById('userAv').style.background='rgba(79,195,247,.25)';
       document.getElementById('userAv').style.color='var(--accent)';
 
-      // 5. Carregar identidade visual do tenant
+      // 7. Carregar identidade visual ISOLADA do tenant
       try {
-        var snapStyle = await _fbDB.ref('tenants/' + window._tenantId + '/config').once('value');
-        var styleCfg = snapStyle.val() || {};
-        if (styleCfg.sistNome) {
-          var logos = document.querySelectorAll('.tb-logo, .login-logo, .logo');
-          logos.forEach(function(el) {
-            el.innerHTML = styleCfg.sistNome;
-          });
-          document.title = styleCfg.sistNome + ' — Sistema de Gestão';
+        var snapStyle=await _fbDB.ref('tenants/'+window._tenantId+'/style').once('value');
+        var stl=snapStyle.val()||{};
+        if(stl.ac)  document.documentElement.style.setProperty('--accent',stl.ac);
+        if(stl.ac2) document.documentElement.style.setProperty('--accent2',stl.ac2);
+        if(stl.bg)  document.documentElement.style.setProperty('--bg',stl.bg);
+        if(stl.name){
+          document.querySelectorAll('.tb-logo, .login-logo, .logo').forEach(function(el){el.innerHTML=stl.name;});
+          document.title=stl.name+' — Sistema de Gestao';
         }
-        if (styleCfg.corPrimaria) {
-          document.documentElement.style.setProperty('--accent', styleCfg.corPrimaria);
-        }
-      } catch(e) {}
+      } catch(e){}
 
+      // 8. Carregar modulos autorizados
+      try {
+        var snapMods=await _fbDB.ref('tenants/'+window._tenantId+'/modules').once('value');
+        window._enabledModules=snapMods.val()||{};
+      } catch(e){window._enabledModules={};}
+
+      // 9. Notificacoes do Super Admin
       setTimeout(verificarNotificacoesGlobais,3000);
+
+      // 10. Listener em TEMPO REAL para Kill Switch
+      _fbDB.ref('tenants/'+window._tenantId+'/licenca').on('value',function(snap){
+        var licRT=snap.val()||{};
+        if(licRT.killSwitch===true){
+          document.getElementById('lockScreen').style.display='flex';
+          document.getElementById('lockMsg').textContent='Acesso bloqueado pelo administrador em tempo real.';
+          document.querySelectorAll('.page-content, #main, #sidebar').forEach(function(el){
+            el.style.pointerEvents='none';el.style.opacity='0.3';
+          });
+        }
+        if(licRT.expiracao){
+          var agoraRT=new Date();var expRT=new Date(licRT.expiracao);
+          if(agoraRT>expRT){
+            document.getElementById('lockScreen').style.display='flex';
+            document.getElementById('lockMsg').textContent='Licenca expirada em '+expRT.toLocaleDateString('pt-BR')+'.';
+          }
+        }
+      });
+
       window.dispatchEvent(new Event('firebaseReady'));
 
     }else{
@@ -138,23 +171,36 @@ function toast(msg, type='ok') {
     }
   });
 
-  // Verifica notificações enviadas pelo Super Admin
-  async function verificarNotificacoesGlobais(){
+  async function carregarSuporteLink(){
     try{
-      var snap=await _fbDB.ref('globalConfig/notificacoes').once('value');
-      var notifs=snap.val()||{};
-      var arr=Object.entries(notifs).sort(function(a,b){return b[0]-a[0];});
-      if(!arr.length)return;
-      var vKey='gbr_nv_'+(window._tenantId||'x');
-      var vistas=JSON.parse(localStorage.getItem(vKey)||'[]');
-      var nova=arr.find(function(n){return !vistas.includes(n[0]);});
-      if(!nova)return;
-      var n=nova[1];
-      toast('📢 GBR: '+n.titulo+' — '+n.mensagem,'info');
-      vistas.push(nova[0]);
-      localStorage.setItem(vKey,JSON.stringify(vistas.slice(-20)));
+      var snap=await _fbDB.ref('core_settings/style').once('value');
+      var cfg=snap.val()||{};
+      var lockWhats=document.getElementById('lockWhats');
+      if(cfg.suporte&&lockWhats) lockWhats.href=cfg.suporte;
     }catch(e){}
   }
+
+  async function verificarNotificacoesGlobais(){
+    try{
+      var snap=await _fbDB.ref('notifications').once('value');
+      var notifs=snap.val()||{};
+      var arr=Object.entries(notifs).sort(function(a,b){return b[0].localeCompare(a[0]);});
+      if(!arr.length)return;
+      var tid=window._tenantId||'x';
+      var vKey='gbr_nv_'+tid;
+      var vistas=JSON.parse(localStorage.getItem(vKey)||'[]');
+      for(var i=0;i<arr.length;i++){
+        var nid=arr[i][0],n=arr[i][1];
+        if(vistas.includes(nid))continue;
+        if(n.destino!=='all'&&n.destino!==tid)continue;
+        toast('GBR: '+n.titulo+' — '+n.mensagem,'info');
+        vistas.push(nid);
+        localStorage.setItem(vKey,JSON.stringify(vistas.slice(-30)));
+        break;
+      }
+    }catch(e){}
+  }
+
   window.logout=function(){
     if(!confirm('Deseja sair?'))return;
     if(typeof auditLog==='function')auditLog('logout','Sessao encerrada');
