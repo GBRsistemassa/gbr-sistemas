@@ -215,6 +215,9 @@ function toast(msg, type='ok') {
         }
       });
 
+      // Registrar ultimo acesso para saude da base
+      try { _fbDB.ref('tenants/'+window._tenantId+'/ultimoAcesso').set(new Date().toISOString()); } catch(e){}
+
       window.dispatchEvent(new Event('firebaseReady'));
 
     }else{
