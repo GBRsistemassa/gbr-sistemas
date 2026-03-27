@@ -3835,14 +3835,22 @@ function nomeSv(sv,id){return (sv||[]).find(x=>x.id==id)?.nome||'—'}
 // ── CADASTRO ─────────────────────────────────
 async function salvarCliente(){
   const nome=v('c_nome').trim();if(!nome)return toast('Informe o nome!','err');
-  const cl=await dbGet('clientes')||[];
-  const c={id:Date.now(),nome,cpf:v('c_cpf'),cnpj:v('c_cnpj'),sexo:v('c_sexo'),nasc:v('c_nasc'),tel:v('c_tel'),email:v('c_email'),end:v('c_end'),num:v('c_num'),comp:v('c_comp'),bairro:v('c_bairro'),cidade:v('c_cidade'),cep:v('c_cep'),cadastroEm:today(),operador:window._currentAuthUser?.email||'—'};
-  cl.push(c);await dbSet('clientes',cl);
-  const fid=await dbGet('fidelidade')||[];
-  fid.push({id:c.id,cpf:c.cpf,nome:c.nome,tel:c.tel,ultimoServ:'—',data:'—',pontos:0,status:'Ativo',ultimoResgate:'—'});
-  await dbSet('fidelidade',fid);
-  await auditLog('create','Cliente cadastrado: '+nome);
-  limparCad();toast('Cliente cadastrado!','ok');
+  if(!window._tenantId){return toast('Sessão sem tenant — faça logout e login novamente.','err');}
+  try{
+    const cl=await dbGet('clientes')||[];
+    const c={id:Date.now(),nome,cpf:v('c_cpf'),cnpj:v('c_cnpj'),sexo:v('c_sexo'),nasc:v('c_nasc'),tel:v('c_tel'),email:v('c_email'),end:v('c_end'),num:v('c_num'),comp:v('c_comp'),bairro:v('c_bairro'),cidade:v('c_cidade'),cep:v('c_cep'),cadastroEm:today(),operador:window._currentAuthUser?.email||'—'};
+    cl.push(c);await dbSet('clientes',cl);
+    const fid=await dbGet('fidelidade')||[];
+    // Evitar duplicata de fidelidade se já existir pelo mesmo id
+    const fidFiltrado=fid.filter(f=>String(f.id)!==String(c.id));
+    fidFiltrado.push({id:c.id,cpf:c.cpf,nome:c.nome,tel:c.tel,ultimoServ:'—',data:'—',pontos:0,status:'Ativo',ultimoResgate:'—'});
+    await dbSet('fidelidade',fidFiltrado);
+    await auditLog('create','Cliente cadastrado: '+nome);
+    limparCad();toast('Cliente cadastrado!','ok');
+  }catch(e){
+    console.error('Erro ao salvar cliente:',e);
+    toast('Erro ao salvar: '+(e.message||e),'err');
+  }
 }
 function limparCad(){['c_nome','c_cpf','c_cnpj','c_nasc','c_tel','c_email','c_end','c_num','c_comp','c_bairro','c_cidade','c_cep'].forEach(id=>{const e=document.getElementById(id);if(e)e.value=''});document.getElementById('c_sexo').value=''}
 
