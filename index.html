@@ -47,7 +47,10 @@ function toast(msg, type='ok') {
     var p=document.getElementById('loginPass').value;
     if(!e||!p)return toast('Preencha e-mail e senha','err');
     var btn=document.getElementById('btnLogin');btn.disabled=true;btn.textContent='Aguarde...';
-    try{await _fbAuth.signInWithEmailAndPassword(e,p);}
+    try{
+      await _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      await _fbAuth.signInWithEmailAndPassword(e,p);
+    }
     catch(err){toast('E-mail ou senha incorretos','err');btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
   };
 
@@ -222,7 +225,7 @@ function toast(msg, type='ok') {
           var btn=document.getElementById('btnLogin');
           if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
         }
-      },800);
+      },3000);
     }
   });
 
