@@ -33,7 +33,7 @@ function toast(msg, type='ok') {
   firebase.initializeApp({apiKey:"AIzaSyAdn8IUIWhZUhvHNAg5jEYAPwtCSaQbKA0",authDomain:"gbr-sistemas-saas.firebaseapp.com",databaseURL:"https://gbr-sistemas-saas-default-rtdb.firebaseio.com",projectId:"gbr-sistemas-saas",storageBucket:"gbr-sistemas-saas.firebasestorage.app",messagingSenderId:"329609507285",appId:"1:329609507285:web:d2c1c9ac41e6e8d8e5cd5c"});
   var _fbDB=firebase.database(),_fbAuth=firebase.auth();
   _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  window._db=_fbDB;window._auth=_fbAuth;window._firebaseReady=false;
+  window._db=_fbDB;window._auth=_fbAuth;window._firebaseReady=false;window._authResolved=false;
   window._fbRef=function(db,p){return db.ref(p);};
   window._fbSet=function(r,v){return r.set(v);};
   window._fbGet=function(r){return r.once('value');};
@@ -218,17 +218,16 @@ function toast(msg, type='ok') {
       // Registrar ultimo acesso para saude da base
       try { _fbDB.ref('tenants/'+window._tenantId+'/ultimoAcesso').set(new Date().toISOString()); } catch(e){}
 
+      window._authResolved=true;
       window.dispatchEvent(new Event('firebaseReady'));
 
     }else{
-      window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;
-      setTimeout(function(){
-        if(!_fbAuth.currentUser){
-          document.getElementById('loginScreen').style.display='flex';
-          var btn=document.getElementById('btnLogin');
-          if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
-        }
-      },3000);
+      window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;window._userRole=null;
+      window._authResolved=true;
+      // Só redireciona para login quando o Firebase já respondeu definitivamente (sem user)
+      document.getElementById('loginScreen').style.display='flex';
+      var btn=document.getElementById('btnLogin');
+      if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
     }
   });
 
@@ -706,7 +705,6 @@ body.light .badge{opacity:.9}
   <div class="ni" id="adminMenuItem" style="display:none" onclick="goTo('admin')"><span class="ico">🛡</span>Painel Admin</div>
   <div class="ns">Sistema</div>
   <div class="ni" data-modulo="whatsapp" onclick="goTo('whatsapp')"><span class="ico">💬</span>WhatsApp</div>
-  <div class="ni" onclick="goTo('manual')"><span class="ico">📖</span>Manual</div>
 </div>
 
 <!-- MAIN -->
@@ -1287,11 +1285,10 @@ body.light .badge{opacity:.9}
     <div style="display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap" id="adminTabs">
       <button class="ptab active" onclick="showAdminTab('acesso',this)">👤 Acesso</button>
       <button class="ptab" onclick="showAdminTab('regras',this)">⚙ Regras</button>
-      <button class="ptab" onclick="showAdminTab('menu',this)">☰ Menu</button>
       <button class="ptab" onclick="showAdminTab('empresa',this)">🏢 Empresa</button>
       <button class="ptab" onclick="showAdminTab('integracoes',this)">🔌 Integrações</button>
-
       <button class="ptab" onclick="showAdminTab('auditoria',this)">🔍 Auditoria</button>
+      <button class="ptab" onclick="showAdminTab('manual',this)">📖 Manual</button>
     </div>
 
     <!-- TAB: ACESSO -->
@@ -1365,10 +1362,7 @@ body.light .badge{opacity:.9}
     </div>
 
     <!-- TAB: MENU -->
-    <div id="adminTab-menu" style="display:none">
-      <div class="admin-grid">
-        <div class="admin-card">
-          <div class="admin-card-title">ORDEM DO MENU</div>
+    <div id="adminTab-menu" style="display:none!important"><!-- aba Menu desativada -->
           <div style="font-size:12px;color:var(--muted2);margin-bottom:12px">Use as setas para reordenar. Ative/desative com o toggle.</div>
           <div id="menuOrderList"></div>
           <button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="salvarOrdemMenu()">✓ Salvar Ordem</button>
@@ -1433,18 +1427,6 @@ body.light .badge{opacity:.9}
     <!-- TAB: EMPRESA -->
     <div id="adminTab-empresa" style="display:none">
       <div class="admin-grid">
-        <div class="admin-card">
-          <div class="admin-card-title">DADOS DA EMPRESA</div>
-          <div class="fgrid" style="gap:12px">
-            <div class="fg"><label>Nome da Empresa</label><input id="emp_nome" placeholder="Minha Empresa"></div>
-            <div class="fg"><label>CNPJ</label><input id="emp_cnpj" placeholder="00.000.000/0000-00"></div>
-            <div class="fg"><label>Telefone</label><input id="emp_tel" placeholder="(11) 99999-9999"></div>
-            <div class="fg"><label>Endereço</label><input id="emp_end" placeholder="Endereço completo"></div>
-            <div class="fg"><label>Cidade</label><input id="emp_cidade" placeholder="Cidade"></div>
-            <div class="fg"><label>Horário de Funcionamento</label><input id="emp_horario" placeholder="Seg-Sáb: 8h às 18h"></div>
-          </div>
-          <button class="btn btn-primary" style="margin-top:12px" onclick="salvarEmpresa()">✓ Salvar Dados</button>
-        </div>
         <div class="admin-card">
           <div class="admin-card-title">🎨 APARÊNCIA DO SISTEMA</div>
           <div style="font-size:12px;color:var(--muted2);margin-bottom:14px">Personalize as cores e logo da interface.</div>
@@ -1544,38 +1526,6 @@ body.light .badge{opacity:.9}
         <div id="evoAdminTestResult" style="margin-top:8px;font-size:12px"></div>
       </div>
 
-      <!-- Firebase -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-          <div style="display:flex;align-items:center;gap:12px">
-            <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,160,0,.15);display:flex;align-items:center;justify-content:center;font-size:22px">🔥</div>
-            <div>
-              <div style="font-weight:600;font-size:15px">Firebase — Banco de Dados</div>
-              <div style="font-size:12px;color:var(--muted2)">Realtime Database + Authentication</div>
-            </div>
-          </div>
-          <span id="firebaseStatusAdmin" class="badge bg-green">🟢 Ativo</span>
-        </div>
-        <div class="fgrid c2" style="gap:12px;margin-bottom:12px">
-          <div class="fg"><label>Project ID</label><input id="adm_fb_proj" placeholder="gbr-sistemas-saas" readonly style="background:var(--surface3)"></div>
-          <div class="fg"><label>Database URL</label><input id="adm_fb_db" placeholder="https://...firebaseio.com" readonly style="background:var(--surface3)"></div>
-          <div class="fg"><label>Auth Domain</label><input id="adm_fb_auth" placeholder="....firebaseapp.com" readonly style="background:var(--surface3)"></div>
-          <div class="fg"><label>API Key</label>
-            <div style="position:relative">
-              <input id="adm_fb_key" type="password" placeholder="••••••••" readonly style="background:var(--surface3)">
-              <button onclick="toggleSenhaVis('adm_fb_key',this)" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted2);font-size:14px">👁</button>
-            </div>
-          </div>
-        </div>
-        <div style="background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.2);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--muted2)">
-          💡 Para alterar o Firebase, edite as credenciais no arquivo HTML (bloco <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">firebaseConfig</code>) e suba novamente via Deploy.
-          <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="window.open('https://console.firebase.google.com/project/gbr-sistemas-saas','_blank')">↗ Abrir Console</button>
-        </div>
-      </div>
-
-
-
-
       <!-- ViaCEP -->
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px">
         <div style="display:flex;align-items:center;justify-content:space-between">
@@ -1613,7 +1563,365 @@ body.light .badge{opacity:.9}
       <table><thead><tr><th>Data/Hora</th><th>Usuário</th><th>Ação</th><th>Detalhe</th><th>Dispositivo</th></tr></thead>
       <tbody id="auditBody"></tbody></table></div>
     </div>
-  </div>
+
+    <!-- TAB: MANUAL -->
+    <div id="adminTab-manual" style="display:none">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+        <button class="ptab active" onclick="showManualTab('geral',this)">🏠 Geral</button>
+        <button class="ptab" onclick="showManualTab('clientes',this)">👥 Clientes</button>
+        <button class="ptab" onclick="showManualTab('agenda',this)">📅 Agenda</button>
+        <button class="ptab" onclick="showManualTab('caixa',this)">💵 Caixa</button>
+        <button class="ptab" onclick="showManualTab('estoque',this)">📦 Estoque</button>
+        <button class="ptab" onclick="showManualTab('financeiro',this)">💰 Financeiro</button>
+        <button class="ptab" onclick="showManualTab('fidelidade',this)">⭐ Fidelidade</button>
+        <button class="ptab" onclick="showManualTab('whatsapp',this)">💬 WhatsApp</button>
+        <button class="ptab" onclick="showManualTab('admin',this)">🛡 Admin</button>
+        <button class="ptab" onclick="showManualTab('pwa',this)">📱 App Mobile</button>
+      </div>
+
+      <!-- GERAL -->
+      <div id="manualTab-geral">
+        <div class="admin-card" style="grid-column:1/-1">
+          <div class="admin-card-title">🏠 VISÃO GERAL DO SISTEMA</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px">📋 MÓDULOS DISPONÍVEIS</div>
+              <div style="font-size:11px;color:var(--muted2);line-height:1.8">Dashboard em tempo real<br>Cadastro de clientes<br>Agendamentos<br>Agenda geral e semanal<br>Checklist com assinatura<br>Tabela de serviços<br>Caixa do dia<br>Financeiro<br>Relatórios e NPS<br>Estoque (ml/g/unid)<br>Ficha técnica<br>Fidelidade / QR Code<br>WhatsApp<br>Painel Admin completo</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px">✅ RECURSOS EXCLUSIVOS</div>
+              <div style="font-size:11px;color:var(--muted2);line-height:1.8">Assinatura digital do cliente<br>Fotos do veículo no checklist<br>Cálculo de lucro líquido real<br>Ficha técnica com custo real<br>QR Code de fidelidade<br>Backup automático semanal<br>Comparativo mensal<br>Visão semanal da agenda<br>Temas e cores personalizáveis<br>Instalar como app (PWA)<br>Controle de acesso por nível<br>Log de auditoria completo</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-size:11px;font-weight:700;color:var(--yellow);margin-bottom:6px">⚡ ATALHOS DO TECLADO</div>
+              <div style="font-size:11px;color:var(--muted2);line-height:1.8"><strong style="color:var(--text)">Ctrl+K</strong> — Busca global<br><strong style="color:var(--text)">Enter</strong> — Confirmar login<br><strong style="color:var(--text)">Esc</strong> — Fechar busca</div>
+            </div>
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">🔐 ACESSO E SESSÃO</div>
+          <div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:12px;color:var(--muted2);line-height:1.8">
+            <strong style="color:var(--text)">Indicador de conexão:</strong> 🟢 Sincronizado = sistema online · 🔴 = offline (dados salvos localmente)<br>
+            <strong style="color:var(--text)">Sair:</strong> Clique em "Sair" no canto superior direito para encerrar a sessão com segurança<br>
+            <strong style="color:var(--text)">Sessão persistente:</strong> O login fica salvo no navegador — não é necessário digitar novamente toda vez
+          </div>
+        </div>
+      </div>
+
+      <!-- CLIENTES -->
+      <div id="manualTab-clientes" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">👥 CADASTRO DE CLIENTES</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Acessar:</strong> Menu → Cadastro<br>
+            <strong style="color:var(--text)">Campos:</strong> Nome*, CPF, CNPJ, Sexo, Data de nascimento, Telefone, E-mail, Endereço completo<br>
+            <strong style="color:var(--text)">CEP automático:</strong> Digite o CEP → clique 🔍 Buscar → endereço preenchido automaticamente<br>
+            <strong style="color:var(--text)">Salvar:</strong> Clique ✓ Salvar Cliente<br>
+            <strong style="color:var(--text)">Limpar:</strong> Clique ↺ Limpar para resetar o formulário
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">🗄️ BANCO DE DADOS</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Acessar:</strong> Menu → Banco de Dados<br>
+            <strong style="color:var(--text)">Buscar clientes:</strong> Use a barra de busca por nome, CPF ou telefone<br>
+            <strong style="color:var(--text)">Editar:</strong> Botão ✎ na linha do cliente<br>
+            <strong style="color:var(--text)">Excluir:</strong> Botão ✕ → confirmação obrigatória<br>
+            <strong style="color:var(--text)">Histórico completo:</strong> Botão 📋 → veja todos os serviços, total gasto e primeira visita<br>
+            <strong style="color:var(--text)">Exportar:</strong> Botão ↓ CSV → baixa lista de clientes em planilha<br>
+            <strong style="color:var(--text)">QR Code:</strong> Cada cliente tem um QR único — escaneie para abrir a ficha diretamente
+          </div>
+        </div>
+      </div>
+
+      <!-- AGENDA -->
+      <div id="manualTab-agenda" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">📅 CRIAR AGENDAMENTO</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">1.</strong> Menu → Agendamento → busque o cliente por nome, CPF ou telefone<br>
+            <strong style="color:var(--text)">2.</strong> Ou clique <strong>+ Avulso</strong> para atendimento sem cadastro<br>
+            <strong style="color:var(--text)">3.</strong> Selecione data, horário de início (o fim é calculado pelo tempo do serviço)<br>
+            <strong style="color:var(--text)">4.</strong> Informe veículo e placa<br>
+            <strong style="color:var(--text)">5.</strong> Clique <strong>＋ Adicionar Serviço</strong> → selecione os serviços (pode ser mais de um)<br>
+            <strong style="color:var(--text)">6.</strong> Aplique desconto se necessário (requer senha ADM se acima do limite configurado)<br>
+            <strong style="color:var(--text)">7.</strong> Selecione forma de pagamento<br>
+            <strong style="color:var(--text)">8.</strong> Clique ✓ Confirmar Agendamento<br><br>
+            <strong style="color:var(--green)">✅ Ao concluir, o sistema automaticamente:</strong><br>
+            • Lança entrada no financeiro<br>
+            • Adiciona pontos de fidelidade ao cliente<br>
+            • Debita insumos do estoque (se ficha técnica configurada)<br>
+            • Envia NPS/avaliação ao cliente (se configurado)
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">📋 AGENDA GERAL E SEMANAL</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Agenda Geral:</strong> Menu → Agenda Geral — lista todos os agendamentos com filtro de status<br>
+            <strong style="color:var(--text)">Visão Semanal:</strong> Menu → Visão Semanal — grade semanal por dia<br>
+            <strong style="color:var(--text)">Mudar status:</strong> Botões diretos na linha: Concluir ✓, Cancelar ✕, Reagendar ↺<br>
+            <strong style="color:var(--text)">Reagendar:</strong> Clique ↺ → escolha nova data e horário<br>
+            <strong style="color:var(--text)">Imprimir OS:</strong> Botão 🖨 → Ordem de Serviço com dados do cliente e valor<br>
+            <strong style="color:var(--text)">Lembretes WA:</strong> Botão 💬 → envia lembrete de confirmação para todos do dia
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">✓ CHECKLIST DE VISTORIA</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Acessar:</strong> Menu → Checklist<br>
+            <strong style="color:var(--text)">1.</strong> Vincule um agendamento existente<br>
+            <strong style="color:var(--text)">2.</strong> Marque cada item como OK ou com problema<br>
+            <strong style="color:var(--text)">3.</strong> Tire fotos do veículo clicando 📷<br>
+            <strong style="color:var(--text)">4.</strong> O cliente assina digitalmente na tela (dedo ou mouse)<br>
+            <strong style="color:var(--text)">5.</strong> Clique ✓ Aprovar e Assinar (ou ✕ Reprovar se houver danos)<br>
+            <strong style="color:var(--text)">Gerenciar itens:</strong> Clique + Adicionar / Editar para personalizar os itens da vistoria<br>
+            <strong style="color:var(--text)">Histórico:</strong> Todos os checklists ficam salvos com data, fotos e assinatura
+          </div>
+        </div>
+      </div>
+
+      <!-- CAIXA -->
+      <div id="manualTab-caixa" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">💵 CAIXA DO DIA</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Abrir caixa:</strong> Menu → Caixa do Dia → clique ▶ Abrir Caixa<br>
+            <strong style="color:var(--text)">Lançamento automático:</strong> Serviços concluídos são lançados automaticamente (se ativado em Admin → Regras)<br>
+            <strong style="color:var(--text)">Entrada manual:</strong> Clique ＋ Entrada → preencha descrição, valor e forma de pagamento<br>
+            <strong style="color:var(--text)">Saída manual:</strong> Clique ＋ Saída → informe categoria (Insumos, Despesas, Suprimento, etc.)<br>
+            <strong style="color:var(--text)">Fechar caixa:</strong> Clique ■ Fechar Caixa → confirme o fechamento<br>
+            <strong style="color:var(--text)">Imprimir:</strong> Clique 🖨 → relatório completo do dia com todas as movimentações<br>
+            <strong style="color:var(--text)">Gráfico:</strong> Evolução do caixa nos últimos 7 dias exibida automaticamente
+          </div>
+        </div>
+      </div>
+
+      <!-- ESTOQUE -->
+      <div id="manualTab-estoque" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">📦 GERENCIAR ESTOQUE</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Acessar:</strong> Menu → Estoque<br>
+            <strong style="color:var(--text)">Adicionar produto:</strong> Preencha nome, categoria, unidade (ml/g/unid), volume por embalagem, quantidade e custo<br>
+            <strong style="color:var(--text)">Total disponível:</strong> Calculado automaticamente (embalagens × volume por embalagem)<br>
+            <strong style="color:var(--text)">Alerta mínimo:</strong> Configure o estoque mínimo — produto aparece em ⚠️ quando abaixo<br>
+            <strong style="color:var(--text)">Baixa automática:</strong> Ao concluir serviço, insumos vinculados na ficha técnica são debitados automaticamente<br>
+            <strong style="color:var(--text)">Editar:</strong> Botão ✎ para ajustar quantidade ou dados do produto
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">💧 SANGRIA DE INSUMO</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            Use para registrar perdas sem vínculo com serviço (derramamento, desperdício, produto vencido)<br>
+            <strong style="color:var(--text)">Acessar:</strong> Estoque → botão 💧 Sangria de Insumo<br>
+            <strong style="color:var(--text)">Preencha:</strong> produto, quantidade perdida e motivo<br>
+            <strong style="color:var(--text)">Resultado:</strong> debita o produto + lança saída no financeiro automaticamente
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">🧮 FICHA TÉCNICA</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">O que é:</strong> Cálculo real do custo de cada serviço incluindo insumos, mão de obra e custos fixos<br>
+            <strong style="color:var(--text)">1. Configure Custos Fixos:</strong> Aluguel, água, energia, internet — são rateados por serviço<br>
+            <strong style="color:var(--text)">2. Configure Mão de Obra:</strong> Valor/hora do colaborador, número de colaboradores e margem desejada<br>
+            <strong style="color:var(--text)">3. Monte a ficha:</strong> Selecione o serviço → adicione os produtos usados com as quantidades<br>
+            <strong style="color:var(--text)">4. O sistema calcula:</strong> Custo de insumos + mão de obra + custo fixo + desgaste = custo real<br>
+            <strong style="color:var(--text)">5. Define preço final:</strong> Veja o preço sugerido com margem → defina o valor final de venda<br>
+            <strong style="color:var(--text)">6. Aplica ao serviço:</strong> Clique ↑ Cadastrar valor final no Serviço<br>
+            <strong style="color:var(--accent)">💡 Dica: Monte a ficha técnica antes de definir os preços dos serviços</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- FINANCEIRO -->
+      <div id="manualTab-financeiro" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">💰 FINANCEIRO</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Acessar:</strong> Menu → Financeiro<br>
+            <strong style="color:var(--text)">Nova movimentação:</strong> Selecione tipo (Entrada/Saída), categoria, valor, data, forma de pagamento e responsável<br>
+            <strong style="color:var(--text)">Categorias de entrada:</strong> Serviço, Outros<br>
+            <strong style="color:var(--text)">Categorias de saída:</strong> Insumos, Despesas, Equipamentos, Outros<br>
+            <strong style="color:var(--text)">Filtros:</strong> Filtre por tipo e por categoria<br>
+            <strong style="color:var(--text)">Busca:</strong> Use a barra para encontrar movimentações específicas
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">📊 RELATÓRIOS E LUCRO LÍQUIDO</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Acessar:</strong> Menu → Relatórios<br>
+            <strong style="color:var(--text)">Comparativo mensal:</strong> Visível no Dashboard — compara receita do mês atual vs anterior<br>
+            <strong style="color:var(--text)">Período:</strong> Alterne entre Diário, Mensal e Anual<br>
+            <strong style="color:var(--text)">Lucro Líquido Real:</strong> Faturamento − Impostos − Custos Fixos − Custos Variáveis − Comissões − Perdas<br>
+            <strong style="color:var(--text)">Configurar custos:</strong> Clique ⚙ Configurar custos → informe impostos, comissões e custos fixos mensais<br>
+            <strong style="color:var(--text)">NPS:</strong> Notas e comentários dos clientes — promotores, neutros e detratores<br>
+            <strong style="color:var(--text)">Top serviços:</strong> Ranking dos serviços mais realizados e mais rentáveis<br>
+            <strong style="color:var(--text)">Exportar:</strong> Botão ↓ Exportar CSV → baixa o extrato do período
+          </div>
+        </div>
+      </div>
+
+      <!-- FIDELIDADE -->
+      <div id="manualTab-fidelidade" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">⭐ PROGRAMA DE FIDELIDADE</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Acessar:</strong> Menu → Fidelidade<br>
+            <strong style="color:var(--text)">Criar regra:</strong> Clique ⚙ Gerenciar Regras → ＋ Nova Regra<br>
+            <strong style="color:var(--text)">Definir:</strong> Pontos necessários, tipo de benefício (Desconto %, Serviço grátis, Brinde), valor e validade<br>
+            <strong style="color:var(--text)">Pontos automáticos:</strong> Configurado por serviço em Menu → Serviços → campo "Pontos Fidelidade"<br>
+            <strong style="color:var(--text)">Acúmulo automático:</strong> Ao concluir serviço, pontos são adicionados automaticamente (ative em Admin → Regras)<br>
+            <strong style="color:var(--text)">Resgatar:</strong> Ranking → botão 🎁 Resgatar na linha do cliente<br>
+            <strong style="color:var(--text)">QR Code:</strong> Clique 🔲 QR Fidelidade → selecione o cliente → QR único é gerado → imprima ou envie
+          </div>
+        </div>
+      </div>
+
+      <!-- WHATSAPP -->
+      <div id="manualTab-whatsapp" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">💬 ENVIO PELO WHATSAPP WEB (SEM CONFIGURAÇÃO)</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">O que é:</strong> Envia mensagens diretamente pelo WhatsApp do seu celular — sem instalar nada extra<br>
+            <strong style="color:var(--text)">Como usar:</strong> WhatsApp → aba Enviar → busque o cliente → selecione template → clique 💬 Abrir WhatsApp<br>
+            <strong style="color:var(--text)">O sistema:</strong> Abre o WhatsApp Web já com o número e a mensagem preenchidos — basta clicar em Enviar<br>
+            <strong style="color:var(--accent)">💡 Funciona em qualquer celular ou computador sem nenhuma configuração</strong>
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">⚡ ENVIO VIA API (AUTOMÁTICO)</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">O que é:</strong> Envio direto pelo sistema, sem abrir o WhatsApp manualmente<br>
+            <strong style="color:var(--text)">Configurar:</strong> Admin → Integrações → preencha URL do servidor, chave API e instância<br>
+            <strong style="color:var(--text)">Testar conexão:</strong> Clique 🔌 Testar — 🟢 = pronto para usar<br>
+            <strong style="color:var(--text)">Enviar:</strong> WhatsApp → aba Enviar → selecione template → clique ⚡ Enviar via API<br>
+            <strong style="color:var(--text)">Automações:</strong> Configure gatilhos automáticos (confirmação, lembrete, conclusão) na aba ⚡ Automações<br>
+            <strong style="color:var(--accent)">💡 A API é configurada pelo suporte GBR — entre em contato para ativação</strong>
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">📝 TEMPLATES DE MENSAGEM</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Criar template:</strong> WhatsApp → Templates → preencha nome, categoria e mensagem<br>
+            <strong style="color:var(--text)">Variáveis disponíveis:</strong> {nome} {telefone} {data} {hora} {servico} {valor} {veiculo} {placa} {empresa} {pontos}<br>
+            <strong style="color:var(--text)">Envio em lote:</strong> 📢 Envio em Lote → selecione template e filtro (todos, inativos, aniversariantes, etc.)<br>
+            <strong style="color:var(--text)">Templates prontos:</strong> O sistema já vem com modelos para confirmação, lembrete, boas-vindas, aniversário e retorno
+          </div>
+        </div>
+      </div>
+
+      <!-- ADMIN -->
+      <div id="manualTab-admin" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">🛡 PAINEL ADMINISTRATIVO — ABAS</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;color:var(--muted2)">
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-weight:700;color:var(--text);margin-bottom:6px">👤 Acesso</div>
+              Níveis de acesso personalizados (ADM, Operador, etc.)<br>
+              Permissões por tela para cada nível<br>
+              Lista de usuários com último acesso<br>
+              Cadastro de novos usuários pelo suporte GBR
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-weight:700;color:var(--text);margin-bottom:6px">⚙ Regras</div>
+              Desconto máximo sem aprovação ADM<br>
+              Senha ADM para operações sensíveis<br>
+              Automações on/off (financeiro, fidelidade, estoque)<br>
+              Obrigar serviços pela ficha técnica
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-weight:700;color:var(--text);margin-bottom:6px">🏢 Empresa + Aparência</div>
+              Nome, telefone, endereço da empresa<br>
+              5 temas prontos + cores personalizadas<br>
+              4 opções de fonte + tamanho ajustável<br>
+              Exportar/Importar configuração visual
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-weight:700;color:var(--text);margin-bottom:6px">💾 Backup</div>
+              Backup automático semanal em nuvem<br>
+              Fazer backup manual a qualquer momento<br>
+              Ver lista dos últimos 10 backups<br>
+              Exportar JSON local para segurança extra
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-weight:700;color:var(--text);margin-bottom:6px">🔒 Segurança</div>
+              Alterar senha ADM<br>
+              Forçar logout de todos os usuários<br>
+              Ativar notificações push<br>
+              Checklist de segurança completo
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-weight:700;color:var(--text);margin-bottom:6px">🔍 Auditoria</div>
+              Log de todas as ações do sistema<br>
+              Filtrar por tipo: login, criação, edição, exclusão, caixa<br>
+              Ver usuário, data/hora e dispositivo<br>
+              Exportar log completo em CSV
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px">
+              <div style="font-weight:700;color:var(--text);margin-bottom:6px">🔌 Integrações</div>
+              Evolution API (WhatsApp automático)<br>
+              ViaCEP (endereço automático por CEP)<br>
+              Configurar URL, chave e instância da API
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PWA / APP MOBILE -->
+      <div id="manualTab-pwa" style="display:none">
+        <div class="admin-card">
+          <div class="admin-card-title">📱 INSTALAR COMO APP NO CELULAR (PWA)</div>
+          <div style="background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.2);border-radius:10px;padding:14px;margin-bottom:14px;font-size:12px;color:var(--muted2);line-height:1.9">
+            O sistema pode ser instalado como app nativo no celular sem precisar de Play Store ou App Store.<br>
+            Funciona no <strong style="color:var(--text)">Android e iPhone</strong> — fica com ícone na tela inicial como qualquer app.
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div style="background:var(--surface2);border-radius:10px;padding:14px">
+              <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px">🤖 ANDROID (Chrome)</div>
+              <div style="font-size:12px;color:var(--muted2);line-height:2">
+                <strong style="color:var(--text)">Opção 1 — Automática:</strong><br>
+                Após abrir o site, aguarde alguns segundos — aparece um banner na parte inferior com botão "Instalar"<br><br>
+                <strong style="color:var(--text)">Opção 2 — Manual:</strong><br>
+                1. Abra o Chrome e acesse o sistema<br>
+                2. Toque nos 3 pontos ⋮ no canto superior direito<br>
+                3. Toque em "Adicionar à tela inicial"<br>
+                4. Confirme o nome → toque "Adicionar"
+              </div>
+            </div>
+            <div style="background:var(--surface2);border-radius:10px;padding:14px">
+              <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px">🍎 IPHONE (Safari)</div>
+              <div style="font-size:12px;color:var(--muted2);line-height:2">
+                <strong style="color:var(--text)">No iPhone use o Safari:</strong><br>
+                1. Abra o Safari e acesse o sistema<br>
+                2. Toque no ícone de compartilhar 📤 (barra inferior)<br>
+                3. Role até "Adicionar à Tela de Início"<br>
+                4. Confirme → toque "Adicionar"<br><br>
+                ⚠️ <em>No iPhone use sempre o Safari — o Chrome não suporta instalação</em>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:14px;background:rgba(105,240,174,.06);border:1px solid rgba(105,240,174,.2);border-radius:10px;padding:14px;font-size:12px;color:var(--muted2);line-height:1.8">
+            <strong style="color:var(--green)">✅ Vantagens do app instalado:</strong><br>
+            • Abre sem barra do navegador (tela cheia)<br>
+            • Ícone na tela inicial como app nativo<br>
+            • Mais rápido de acessar<br>
+            • Recebe notificações push (Android)<br>
+            • Funciona mesmo com internet lenta (cache)
+          </div>
+        </div>
+        <div class="admin-card" style="margin-top:14px">
+          <div class="admin-card-title">🔔 NOTIFICAÇÕES PUSH</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:2">
+            <strong style="color:var(--text)">Ativar:</strong> Admin → Segurança → botão "Ativar" em Notificações push → autorize no popup do navegador<br>
+            <strong style="color:var(--text)">O que notifica:</strong> Novos agendamentos, alertas de estoque baixo, lembretes<br>
+            <strong style="color:var(--text)">Funciona em:</strong> Chrome (Android e Desktop), Edge<br>
+            <strong style="color:var(--text)">Não funciona em:</strong> Safari no iPhone (limitação da Apple)
+          </div>
+        </div>
+      </div>
+    </div><!-- /adminTab-manual -->
+
+  </div><!-- /page-admin -->
 
   <!-- ════════════════ WHATSAPP ════════════════ -->
   <div class="page" id="page-whatsapp">
@@ -2010,8 +2318,7 @@ body.light .badge{opacity:.9}
   </div>
 
   <!-- MANUAL -->
-  <div class="page" id="page-manual">
-    <div class="ph"><div class="ph-l"><div class="ph-t">MANUAL DE <span>INSTRUÇÕES</span></div><div class="ph-s">Guia completo do sistema v4.0 — GitHub Pages + Firebase</div></div></div>
+  <div class="page" id="page-manual" style="display:none!important"><!-- Manual movido para Admin → aba Manual -->
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
       <button class="ptab active" onclick="showManualTab('geral',this)">🏠 Geral</button>
       <button class="ptab" onclick="showManualTab('clientes',this)">👥 Clientes</button>
@@ -2588,6 +2895,9 @@ body.light .badge{opacity:.9}
 <script>
 'use strict';
 let isFB = false;
+// Variáveis de estado globais declaradas aqui para evitar erros de referência
+window._evoConfig = window._evoConfig || null;
+window._evoConectado = window._evoConectado || false;
 
 window.addEventListener('firebaseReady', () => {
   isFB = !!window._firebaseReady && !!window._db;
@@ -2595,11 +2905,12 @@ window.addEventListener('firebaseReady', () => {
   document.getElementById('syncLabel').textContent = isFB ? 'SINCRONIZADO' : 'OFFLINE';
   auditLog('login', 'Acesso ao sistema');
   initApp();
-});
+}, { once: true });
 
 // ── DATA LAYER ──────────────────────────────
 async function dbGet(key) {
-  const tid = window._tenantId || 'shared';
+  const tid = window._tenantId;
+  if (!tid) { console.warn('dbGet("'+key+'") chamado sem tenantId — ignorado'); return (['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas'].includes(key)) ? {} : []; }
   if (isFB && window._db) {
     try {
       const snap = await window._fbGet(window._fbRef(window._db, 'tenants/' + tid + '/' + key));
@@ -2611,7 +2922,8 @@ async function dbGet(key) {
   return lsGet(key);
 }
 async function dbSet(key, val) {
-  const tid = window._tenantId || 'shared';
+  const tid = window._tenantId;
+  if (!tid) { console.warn('dbSet("'+key+'") chamado sem tenantId — ignorado'); return; }
   if (isFB && window._db) {
     try { await window._fbSet(window._fbRef(window._db, 'tenants/' + tid + '/' + key), val); return; }
     catch(e) { console.warn('FB write failed', e); }
@@ -2619,7 +2931,8 @@ async function dbSet(key, val) {
   lsSet(key, val);
 }
 function dbListen(key, cb) {
-  const tid = window._tenantId || 'shared';
+  const tid = window._tenantId;
+  if (!tid) { console.warn('dbListen("'+key+'") chamado sem tenantId — ignorado'); return; }
   if (!isFB || !window._db) return;
   window._fbOnValue(window._fbRef(window._db, 'tenants/' + tid + '/' + key), snap => {
     const val = snap.val();
@@ -2692,7 +3005,7 @@ function goTo(page) {
     estoque:renderEst, checklist:renderChecklist, relatorios:renderRelatorios,
     caixa:renderCaixa, admin:renderAdmin, fichatecnica:renderFichaTecnica,
     historico:()=>{}, // renderizado por abrirHistoricoCliente
-    whatsapp:renderWhatsApp,
+    whatsapp:renderWA,
     agendamento:()=>{
       document.getElementById('ag_data').value=today();
       if(!agServicos.length||agServicos.every(s=>s.removido)){
@@ -2731,10 +3044,9 @@ async function initApp() {
   const regras = await dbGet('regras');
   if (!regras || !regras.pts50) await dbSet('regras',{pts50:50,pts100:100,pts200:200,estMin:2,estCrit:0,descMax:30,descAprov:20,togFin:true,togFid:true,togEst:true});
 
-  // Verificar se usuário é admin
+  // Verificar se usuário é admin — usa window._userRole definido no login (via userTenants)
   const email = window._currentAuthUser?.email || '';
-  const roles = await dbGet('roles') || {};
-  const userRole = roles[email.replace(/\./g,'_')] || 'admin';
+  const userRole = window._userRole || 'admin';
   if (userRole === 'admin') {
     document.getElementById('adminSection').style.display = '';
     document.getElementById('adminMenuItem').style.display = '';
@@ -2795,6 +3107,12 @@ async function initApp() {
       toast(`📋 Abrindo ficha de ${urlParams.get('nome')||'cliente'}...`,'info');
     },1500);
   }
+  // Aplicar permissões de role após toda a inicialização
+  try {
+    if (window._userRole && typeof aplicarPermissoes === 'function') {
+      aplicarPermissoes(window._userRole);
+    }
+  } catch(e) { console.warn('aplicarPermissoes:', e); }
 }
 
 // ── DESCONTO ─────────────────────────────────
@@ -2891,6 +3209,513 @@ async function renderAlertas(clientes, agendamentos){
         </div>`).join('')}
     </div>`;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   WHATSAPP — Funções completas (Web manual + API futura)
+══════════════════════════════════════════════════════════════ */
+
+// Variáveis de estado WA
+var _waCli = null;       // cliente selecionado
+var _waTpl = null;       // template selecionado
+var _waTpls = [];        // lista de templates carregados
+var _waAgends = [];      // agendamentos do cliente selecionado
+
+// Templates padrão para estéticas (seed automático)
+var WA_TEMPLATES_PADRAO = [
+  {id:'tpl_conf',  nome:'Confirmação de Agendamento', categoria:'Confirmação',
+   msg:'Olá, {nome}! 😊 Confirmamos seu agendamento na *{empresa}*:\n\n📅 *Data:* {data}\n⏰ *Horário:* {hora}\n🚗 *Veículo:* {veiculo} — {placa}\n✨ *Serviço:* {servico}\n\nQualquer dúvida, estamos à disposição! Te esperamos 👍'},
+  {id:'tpl_lemb',  nome:'Lembrete — Amanhã', categoria:'Lembrete',
+   msg:'Oi, {nome}! Tudo bem? 👋\n\nPassando para lembrar que seu agendamento é *amanhã*:\n\n📅 *{data}* às *{hora}*\n✨ *{servico}*\n🏠 *{empresa}*\n\nNos vemos lá! 🚗'},
+  {id:'tpl_conc',  nome:'Serviço Concluído — Obrigado', categoria:'Conclusão',
+   msg:'Obrigado pela visita, {nome}! 🙏\n\nSeu serviço foi concluído com sucesso na *{empresa}*.\n\n💎 *{servico}* — {valor}\n\nFicou satisfeito? Deixe sua avaliação — sua opinião é muito importante pra gente! ⭐\n\nAté a próxima! 😊'},
+  {id:'tpl_boas',  nome:'Boas-vindas — Novo Cliente', categoria:'Confirmação',
+   msg:'Olá, {nome}! Seja muito bem-vindo(a) à *{empresa}*! 🎉\n\nEstamos felizes em te ter conosco.\n\n✨ Qualidade e cuidado em cada serviço!\n📍 {cidade}\n\nAguardamos sua visita! 😊'},
+  {id:'tpl_aniv',  nome:'Feliz Aniversário', categoria:'Aniversário',
+   msg:'Hoje é dia de comemorar! 🎂🎉\n\nA equipe da *{empresa}* deseja a você, {nome}, um *Feliz Aniversário* cheio de saúde, paz e alegria!\n\nComo presente, temos uma surpresa especial esperando por você. Venha nos visitar! 🎁'},
+  {id:'tpl_inat',  nome:'Sentimos sua falta — Retorno', categoria:'Inativo',
+   msg:'Oi, {nome}! Sentimos sua falta aqui na *{empresa}* 😔\n\nFaz um tempo que não te vemos... Que tal agendar uma visita?\n\n👉 É só responder essa mensagem ou nos ligar para marcar seu horário.\n\nEsperamos te ver em breve! 🙌'},
+  {id:'tpl_fid',   nome:'Seus Pontos de Fidelidade', categoria:'Fidelidade',
+   msg:'Oi, {nome}! 🌟\n\nVocê tem *{pontos} pontos* acumulados no programa de fidelidade da *{empresa}*!\n\n🎁 Troque seus pontos por descontos e benefícios exclusivos.\n\nVenha aproveitar! 😊'},
+  {id:'tpl_promo', nome:'Promoção Especial', categoria:'Promoção',
+   msg:'🚨 *OFERTA ESPECIAL — {empresa}* 🚨\n\nOlá, {nome}!\n\nTemos uma promoção imperdível esperando por você! 🔥\n\n✅ {servico}\n\nVálido por tempo limitado — garanta já o seu horário!\n\n👉 Responda essa mensagem para agendar.'}
+];
+
+// Seeder automático de templates
+async function seedTemplatesWA() {
+  var tpls = await dbGet('waTemplates') || [];
+  if (!Array.isArray(tpls)) tpls = Object.values(tpls);
+  if (tpls.length > 0) return; // já tem templates, não sobrescreve
+  await dbSet('waTemplates', WA_TEMPLATES_PADRAO);
+  _waTpls = WA_TEMPLATES_PADRAO.slice();
+}
+
+// Navegar entre abas WA
+function showWATab(tab, btn) {
+  document.querySelectorAll('[id^="waTab-"]').forEach(function(el){ el.style.display='none'; });
+  var el = document.getElementById('waTab-' + tab);
+  if (el) el.style.display = '';
+  document.querySelectorAll('#waTabs .ptab').forEach(function(b){ b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  if (tab === 'templates') renderWATemplates();
+  if (tab === 'historico') renderHistoricoWA();
+  if (tab === 'lote') { renderWATemplates(); filtrarDestinatariosWA(); }
+  if (tab === 'automacoes') atualizarStatusAutoWA();
+}
+
+// Buscar cliente na caixa de busca
+async function buscarCliWA() {
+  var q = (document.getElementById('waBuscaCli').value || '').toLowerCase().trim();
+  var res = document.getElementById('waCliResultados');
+  if (!q || q.length < 2) { res.innerHTML=''; return; }
+  var clis = await dbGet('clientes') || [];
+  var found = clis.filter(function(c){
+    return (c.nome||'').toLowerCase().includes(q) || (c.cpf||'').includes(q) || (c.telefone||'').replace(/\D/g,'').includes(q.replace(/\D/g,''));
+  }).slice(0, 8);
+  if (!found.length) { res.innerHTML='<div style="font-size:12px;color:var(--muted2);padding:8px">Nenhum cliente encontrado</div>'; return; }
+  res.innerHTML = found.map(function(c){
+    return '<div onclick="selecionarCliWA(\''+c.id+'\')" style="padding:10px 12px;border-radius:8px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">' +
+      '<div><div style="font-size:13px;font-weight:600">'+escHtml(c.nome||'Sem nome')+'</div><div style="font-size:11px;color:var(--muted2)">'+(c.telefone||'Sem telefone')+'</div></div>' +
+      '<span class="badge bg-'+(c.telefone?'green':'red')+'">'+(c.telefone?'✔ Telefone':'Sem tel')+'</span></div>';
+  }).join('');
+}
+
+async function selecionarCliWA(id) {
+  var clis = await dbGet('clientes') || [];
+  _waCli = clis.find(function(c){ return String(c.id)===String(id); });
+  if (!_waCli) return;
+  document.getElementById('waCliResultados').innerHTML = '';
+  document.getElementById('waBuscaCli').value = '';
+  document.getElementById('waCliSel').style.display = '';
+  document.getElementById('waCliNome').textContent = _waCli.nome || '—';
+  document.getElementById('waCliTel').textContent = _waCli.telefone || 'Sem telefone cadastrado';
+  // Carregar agendamentos do cliente
+  var ags = await dbGet('agendamentos') || [];
+  _waAgends = ags.filter(function(a){ return String(a.clienteId)===String(id); })
+    .sort(function(a,b){ return (b.data||'').localeCompare(a.data||''); }).slice(0, 10);
+  var sel = document.getElementById('waAgendSel');
+  sel.innerHTML = '<option value="">Nenhum agendamento</option>' + _waAgends.map(function(a){
+    return '<option value="'+a.id+'">'+a.data+' '+a.hora+' — '+(a.servicos||[{nome:'Avulso'}]).map(function(s){return s.nome;}).join(', ')+'</option>';
+  }).join('');
+  renderWATemplates();
+  previewMsgWA();
+}
+
+function limparSelWA() {
+  _waCli = null;
+  document.getElementById('waCliSel').style.display = 'none';
+  document.getElementById('waBuscaCli').value = '';
+  document.getElementById('waMsgPreview').value = '';
+  document.getElementById('waBtnEnviar').disabled = true;
+  document.getElementById('waMetodoAtual').textContent = '';
+}
+
+// Renderizar lista de templates (aba Enviar e aba Templates)
+async function renderWATemplates() {
+  var tpls = await dbGet('waTemplates') || [];
+  if (!Array.isArray(tpls)) tpls = Object.values(tpls);
+  _waTpls = tpls;
+
+  // Atualizar select do envio em lote
+  var loteSel = document.getElementById('waLoteTemplate');
+  if (loteSel) {
+    loteSel.innerHTML = '<option value="">Selecione...</option>' + tpls.map(function(t,i){
+      return '<option value="'+i+'">'+escHtml(t.nome)+'</option>';
+    }).join('');
+  }
+
+  // Lista de templates na aba Enviar (cards clicáveis)
+  var lista = document.getElementById('waTemplatesLista');
+  if (lista) {
+    var catFil = ''; // sem filtro na aba enviar
+    lista.innerHTML = tpls.length === 0 ? '<div style="font-size:12px;color:var(--muted2);padding:10px">Nenhum template. Crie na aba 📝 Templates</div>' :
+      tpls.map(function(t, i){
+        return '<div id="waTplCard'+i+'" onclick="selecionarTplWA('+i+')" style="padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid var(--border);margin-bottom:6px;transition:all .15s" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="if(_waTpl!=='+i+')this.style.borderColor=\'var(--border)\'">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;font-weight:600">'+escHtml(t.nome)+'</span><span class="badge bg-blue" style="font-size:9px">'+escHtml(t.categoria)+'</span></div>' +
+          '<div style="font-size:11px;color:var(--muted2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml((t.msg||'').substring(0,60))+'...</div>' +
+        '</div>';
+      }).join('');
+  }
+
+  // Tabela de templates na aba Templates
+  var body = document.getElementById('waTplBody');
+  var count = document.getElementById('waTplCount');
+  if (!body) return;
+  var catFiltro = (document.getElementById('waTplCatFilter')||{}).value || '';
+  var filtrados = catFiltro ? tpls.filter(function(t){ return t.categoria===catFiltro; }) : tpls;
+  if (count) count.textContent = filtrados.length;
+  body.innerHTML = filtrados.length === 0 ? '<tr><td colspan="4" class="tde">Nenhum template encontrado</td></tr>' :
+    filtrados.map(function(t, i){
+      var ri = tpls.indexOf(t);
+      return '<tr><td>'+escHtml(t.nome)+'</td><td><span class="badge bg-blue">'+escHtml(t.categoria)+'</span></td>' +
+        '<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml((t.msg||'').substring(0,80))+'</td>' +
+        '<td><button class="btn btn-ghost btn-sm" onclick="editarTplWA('+ri+')">✎</button> ' +
+        '<button class="btn btn-danger btn-sm" onclick="excluirTplWA('+ri+')">✕</button></td></tr>';
+    }).join('');
+}
+
+function selecionarTplWA(i) {
+  _waTpl = i;
+  document.querySelectorAll('[id^="waTplCard"]').forEach(function(el){ el.style.borderColor='var(--border)'; el.style.background=''; });
+  var card = document.getElementById('waTplCard'+i);
+  if (card) { card.style.borderColor='var(--accent)'; card.style.background='rgba(79,195,247,.06)'; }
+  previewMsgWA();
+}
+
+// Preview da mensagem com variáveis substituídas
+function previewMsgWA() {
+  if (_waTpl === null || _waTpl === undefined || !_waTpls[_waTpl]) {
+    document.getElementById('waMsgPreview').value = '';
+    document.getElementById('waBtnEnviar').disabled = true;
+    return;
+  }
+  var tpl = _waTpls[_waTpl];
+  var agSel = document.getElementById('waAgendSel');
+  var ag = agSel && agSel.value ? _waAgends.find(function(a){ return String(a.id)===agSel.value; }) : (_waAgends[0]||null);
+  var emp = window._empresaConfig || {};
+  var msg = substituirVarsWA(tpl.msg, _waCli, ag, emp);
+  document.getElementById('waMsgPreview').value = msg;
+  // Atualizar método de envio
+  var cfg = window._evoConfig;
+  var temApi = cfg && cfg.url && cfg.key && cfg.instancia;
+  document.getElementById('waBtnIcon').textContent = '💬';
+  document.getElementById('waBtnText').textContent = 'Abrir WhatsApp';
+  document.getElementById('waMetodoAtual').textContent = temApi ? '✅ API configurada — use ⚡ Enviar via API para envio automático' : 'ℹ️ Modo manual — abre o WhatsApp Web com a mensagem pronta';
+  document.getElementById('waBtnEnviar').disabled = !_waCli || !_waCli.telefone;
+  if (!_waCli || !_waCli.telefone) document.getElementById('waEnvioStatus').textContent = '⚠️ Cliente sem telefone cadastrado';
+  else document.getElementById('waEnvioStatus').textContent = '';
+}
+
+// Substituir variáveis {nome}, {data}, etc.
+function substituirVarsWA(msg, cli, ag, emp) {
+  if (!msg) return '';
+  var svs = ag && ag.servicos ? ag.servicos.map(function(s){ return s.nome; }).join(', ') : '';
+  return (msg||'')
+    .replace(/\{nome\}/g,    (cli&&cli.nome)||'Cliente')
+    .replace(/\{telefone\}/g,(cli&&cli.telefone)||'')
+    .replace(/\{data\}/g,    (ag&&ag.data) ? fmtDate(ag.data) : hoje())
+    .replace(/\{hora\}/g,    (ag&&ag.hora)||'')
+    .replace(/\{servico\}/g, svs || (ag&&ag.servicos&&ag.servicos[0]&&ag.servicos[0].nome)||'Serviço')
+    .replace(/\{valor\}/g,   (ag&&ag.total) ? fmt(ag.total) : '')
+    .replace(/\{veiculo\}/g, (ag&&ag.veiculo)||'')
+    .replace(/\{placa\}/g,   (ag&&ag.placa)||'')
+    .replace(/\{empresa\}/g, (emp&&emp.nome)||document.title||'')
+    .replace(/\{cidade\}/g,  (emp&&emp.cidade)||'')
+    .replace(/\{pontos\}/g,  (cli&&cli.pontos)||'0')
+    .replace(/\{beneficio\}/g,'');
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  var p = d.split('-');
+  return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : d;
+}
+
+// Enviar via WhatsApp Web (abre wa.me com mensagem)
+async function enviarMsgWA() {
+  if (!_waCli || !_waCli.telefone) return toast('Selecione um cliente com telefone','err');
+  if (_waTpl === null || _waTpl === undefined) return toast('Selecione um template','err');
+  var msg = document.getElementById('waMsgPreview').value;
+  if (!msg.trim()) return toast('A mensagem está vazia','err');
+  var cfg = window._evoConfig;
+  var temApi = cfg && cfg.url && cfg.key && cfg.instancia && window._evoConectado;
+  if (temApi) {
+    await enviarViaEvoAPI(msg);
+  } else {
+    abrirWAWeb(msg);
+  }
+}
+
+function abrirWAWeb(msg) {
+  var tel = (_waCli.telefone||'').replace(/\D/g,'');
+  if (!tel) return toast('Número de telefone inválido','err');
+  if (tel.length <= 11) tel = '55' + tel; // adicionar DDI Brasil
+  var url = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
+  window.open(url, '_blank');
+  registrarEnvioWA('web');
+  toast('WhatsApp aberto! Clique em Enviar no WhatsApp','ok');
+}
+
+async function enviarViaEvoAPI(msg) {
+  var cfg = window._evoConfig;
+  var tel = (_waCli.telefone||'').replace(/\D/g,'');
+  if (tel.length <= 11) tel = '55' + tel;
+  document.getElementById('waBtnEnviar').disabled = true;
+  document.getElementById('waEnvioStatus').textContent = '⏳ Enviando via API...';
+  try {
+    var res = await fetch(cfg.url + '/message/sendText/' + cfg.instancia, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': cfg.key },
+      body: JSON.stringify({ number: tel, textMessage: { text: msg } })
+    });
+    var data = await res.json();
+    if (res.ok && (data.key || data.status === 'PENDING' || data.id)) {
+      toast('Mensagem enviada via API!','ok');
+      document.getElementById('waEnvioStatus').textContent = '✅ Enviado com sucesso';
+      registrarEnvioWA('api');
+    } else {
+      throw new Error(data.message || 'Falha no envio');
+    }
+  } catch(e) {
+    document.getElementById('waEnvioStatus').textContent = '❌ Erro: ' + e.message + ' — usando WhatsApp Web...';
+    abrirWAWeb(msg);
+  } finally {
+    document.getElementById('waBtnEnviar').disabled = false;
+  }
+}
+
+async function registrarEnvioWA(via) {
+  var hist = await dbGet('waHistorico') || [];
+  if (!Array.isArray(hist)) hist = Object.values(hist);
+  var tpl = _waTpl !== null && _waTpls[_waTpl] ? _waTpls[_waTpl] : {nome:'Personalizada'};
+  hist.unshift({
+    id: Date.now(),
+    ts: new Date().toISOString(),
+    clienteNome: (_waCli&&_waCli.nome)||'—',
+    clienteTel: (_waCli&&_waCli.telefone)||'—',
+    template: tpl.nome,
+    via: via,
+    operador: window._currentAuthUser?.email||'—'
+  });
+  if (hist.length > 200) hist = hist.slice(0, 200);
+  await dbSet('waHistorico', hist);
+  renderHistoricoWA();
+}
+
+function copiarMsgWA() {
+  var ta = document.getElementById('waMsgPreview');
+  if (!ta || !ta.value) return toast('Nada para copiar','err');
+  navigator.clipboard.writeText(ta.value).then(function(){ toast('Mensagem copiada!','ok'); });
+}
+
+// ── CRUD de templates ──
+async function salvarTemplateWA() {
+  var nome = (document.getElementById('waTplNome').value||'').trim();
+  var cat  = document.getElementById('waTplCat').value;
+  var msg  = (document.getElementById('waTplMsg').value||'').trim();
+  if (!nome || !msg) return toast('Nome e mensagem são obrigatórios','err');
+  var tpls = await dbGet('waTemplates') || [];
+  if (!Array.isArray(tpls)) tpls = Object.values(tpls);
+  var editId = document.getElementById('waTplNome').dataset.editId;
+  if (editId !== undefined && editId !== '') {
+    tpls[parseInt(editId)] = {id: tpls[parseInt(editId)].id || 'tpl_'+Date.now(), nome, categoria:cat, msg};
+    toast('Template atualizado!','ok');
+  } else {
+    tpls.push({id:'tpl_'+Date.now(), nome, categoria:cat, msg});
+    toast('Template salvo!','ok');
+  }
+  await dbSet('waTemplates', tpls);
+  limparFormTplWA();
+  renderWATemplates();
+  await auditLog('create','Template WA: '+nome);
+}
+
+function editarTplWA(i) {
+  var tpl = _waTpls[i];
+  if (!tpl) return;
+  document.getElementById('waTplNome').value = tpl.nome;
+  document.getElementById('waTplNome').dataset.editId = i;
+  document.getElementById('waTplCat').value = tpl.categoria;
+  document.getElementById('waTplMsg').value = tpl.msg;
+  previewTplWA();
+  document.getElementById('waTplNome').scrollIntoView({behavior:'smooth'});
+  toast('Template carregado para edição','info');
+}
+
+async function excluirTplWA(i) {
+  if (!confirm('Excluir este template?')) return;
+  var tpls = await dbGet('waTemplates') || [];
+  if (!Array.isArray(tpls)) tpls = Object.values(tpls);
+  tpls.splice(i, 1);
+  await dbSet('waTemplates', tpls);
+  renderWATemplates();
+  toast('Template excluído','info');
+  await auditLog('delete','Template WA excluído: índice '+i);
+}
+
+function limparFormTplWA() {
+  document.getElementById('waTplNome').value = '';
+  document.getElementById('waTplNome').dataset.editId = '';
+  document.getElementById('waTplCat').value = 'Lembrete';
+  document.getElementById('waTplMsg').value = '';
+  document.getElementById('waTplPreview').textContent = '';
+}
+
+function previewTplWA() {
+  var msg = document.getElementById('waTplMsg').value;
+  var prev = substituirVarsWA(msg,
+    {nome:'Maria Silva', telefone:'(11) 99999-9999', pontos:'120'},
+    {data: today(), hora:'09:00', servicos:[{nome:'Lavagem + Cera'}], veiculo:'Civic Prata', placa:'ABC-1234', total:150},
+    window._empresaConfig || {nome:'GBR Estética', cidade:'São Paulo'}
+  );
+  document.getElementById('waTplPreview').textContent = prev;
+}
+
+function inserirVariavelWA(variavel) {
+  var ta = document.getElementById('waTplMsg');
+  if (!ta) return;
+  var pos = ta.selectionStart || ta.value.length;
+  ta.value = ta.value.slice(0, pos) + variavel + ta.value.slice(pos);
+  ta.selectionStart = ta.selectionEnd = pos + variavel.length;
+  ta.focus();
+  previewTplWA();
+}
+
+// ── Envio em lote ──
+var _waLoteDests = [];
+async function filtrarDestinatariosWA() {
+  var filtro = (document.getElementById('waLoteFiltro')||{}).value || 'todos';
+  var clis = await dbGet('clientes') || [];
+  var ags  = await dbGet('agendamentos') || [];
+  var hoje = today();
+  var amanha = new Date(); amanha.setDate(amanha.getDate()+1);
+  var amStr = amanha.toISOString().split('T')[0];
+  var mesAtual = hoje.substring(0,7);
+  switch(filtro) {
+    case 'inativos90':
+      var d90 = new Date(); d90.setDate(d90.getDate()-90);
+      var d90Str = d90.toISOString().split('T')[0];
+      var ativos = new Set(ags.filter(function(a){ return a.data>=d90Str; }).map(function(a){ return String(a.clienteId); }));
+      _waLoteDests = clis.filter(function(c){ return c.telefone && !ativos.has(String(c.id)); }); break;
+    case 'agendAmanha':
+      var idsAmanha = new Set(ags.filter(function(a){ return a.data===amStr; }).map(function(a){ return String(a.clienteId); }));
+      _waLoteDests = clis.filter(function(c){ return c.telefone && idsAmanha.has(String(c.id)); }); break;
+    case 'aniversario':
+      var mesN = ('0'+(new Date().getMonth()+1)).slice(-2);
+      _waLoteDests = clis.filter(function(c){ return c.telefone && c.nascimento && c.nascimento.substring(5,7)===mesN; }); break;
+    case 'fidelidade':
+      _waLoteDests = clis.filter(function(c){ return c.telefone && (c.pontos||0)>0; }); break;
+    default:
+      _waLoteDests = clis.filter(function(c){ return !!c.telefone; }); break;
+  }
+  var stats = document.getElementById('waLoteStats');
+  var dest = document.getElementById('waLoteDestinatarios');
+  var btn = document.getElementById('waBtnLote');
+  if (stats) stats.innerHTML = '<div style="font-size:13px;color:var(--text)"><strong>'+_waLoteDests.length+'</strong> destinatários encontrados</div>';
+  if (btn) btn.disabled = _waLoteDests.length === 0;
+  if (dest) dest.innerHTML = _waLoteDests.length === 0
+    ? '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Nenhum destinatário</div>'
+    : _waLoteDests.map(function(c){
+        return '<div style="display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px"><span>'+escHtml(c.nome)+'</span><span style="color:var(--muted2)">'+c.telefone+'</span></div>';
+      }).join('');
+}
+
+async function iniciarEnvioLote() {
+  var tplIdx = parseInt((document.getElementById('waLoteTemplate')||{}).value);
+  if (isNaN(tplIdx) || !_waTpls[tplIdx]) return toast('Selecione um template','err');
+  if (!_waLoteDests.length) return toast('Nenhum destinatário','err');
+  if (!confirm('Enviar para '+_waLoteDests.length+' cliente(s)?\n\nCada mensagem abrirá o WhatsApp em sequência.')) return;
+  var emp = window._empresaConfig || {};
+  for (var i = 0; i < _waLoteDests.length; i++) {
+    _waCli = _waLoteDests[i];
+    var msg = substituirVarsWA(_waTpls[tplIdx].msg, _waCli, null, emp);
+    await new Promise(function(res){ setTimeout(res, 800); });
+    abrirWAWeb(msg);
+  }
+  _waCli = null;
+  toast('Envio em lote iniciado para '+_waLoteDests.length+' clientes','ok');
+}
+
+// ── Histórico ──
+async function renderHistoricoWA() {
+  var hist = await dbGet('waHistorico') || [];
+  if (!Array.isArray(hist)) hist = Object.values(hist);
+  var q = ((document.getElementById('waHistSearch')||{}).value||'').toLowerCase();
+  if (q) hist = hist.filter(function(h){ return (h.clienteNome||'').toLowerCase().includes(q)||(h.template||'').toLowerCase().includes(q); });
+  var body = document.getElementById('waHistBody');
+  var count = document.getElementById('waHistCount');
+  if (count) count.textContent = hist.length;
+  if (!body) return;
+  body.innerHTML = hist.length === 0 ? '<tr><td colspan="7" class="tde">Nenhuma mensagem enviada</td></tr>' :
+    hist.map(function(h){
+      var via = h.via==='api' ? '<span class="badge bg-green">⚡ API</span>' : '<span class="badge bg-blue">💬 Web</span>';
+      return '<tr><td style="font-size:11px">'+fmtDateTime(h.ts)+'</td><td>'+escHtml(h.clienteNome)+'</td><td>'+escHtml(h.clienteTel)+'</td><td>'+escHtml(h.template)+'</td><td>'+via+'</td><td style="font-size:11px">'+escHtml(h.operador)+'</td>' +
+        '<td><button class="btn btn-ghost btn-sm" onclick="reenviarWA(\''+h.clienteTel+'\',\''+encodeURIComponent(h.template)+'\')">↻ Reenviar</button></td></tr>';
+    }).join('');
+}
+
+function fmtDateTime(ts) {
+  if (!ts) return '—';
+  var d = new Date(ts);
+  return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+}
+
+async function exportHistoricoWA() {
+  var hist = await dbGet('waHistorico') || [];
+  if (!Array.isArray(hist)) hist = Object.values(hist);
+  var csv = 'Data/Hora,Cliente,Telefone,Template,Via,Operador\n';
+  csv += hist.map(function(h){ return [fmtDateTime(h.ts),h.clienteNome,h.clienteTel,h.template,h.via,h.operador].map(function(v){ return '"'+(v||'').replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+  var a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'historico_whatsapp_'+today()+'.csv';
+  a.click();
+  await auditLog('export','Histórico WA exportado');
+}
+
+// ── Automações ──
+async function atualizarStatusAutoWA() {
+  var cfg = window._evoConfig;
+  var dot = document.getElementById('waAutoStatusDot');
+  var label = document.getElementById('waAutoStatusLabel');
+  if (!dot || !label) return;
+  if (!cfg || !cfg.url) {
+    dot.style.background = 'var(--border2)';
+    label.textContent = 'API não configurada — use Painel Admin → Integrações';
+    return;
+  }
+  dot.style.background = 'var(--yellow)';
+  label.textContent = 'Verificando API...';
+  try {
+    var r = await fetch(cfg.url + '/instance/connectionState/' + cfg.instancia, { headers:{'apikey': cfg.key} });
+    var d = await r.json();
+    var conn = d.instance?.state === 'open' || d.state === 'open';
+    dot.style.background = conn ? 'var(--green)' : 'var(--red)';
+    label.textContent = conn ? 'API conectada — automações ativas' : 'API desconectada';
+    window._evoConectado = conn;
+  } catch(e) {
+    dot.style.background = 'var(--red)';
+    label.textContent = 'Erro ao conectar: ' + e.message;
+  }
+}
+
+async function salvarAutomacoesWA() {
+  var els = document.querySelectorAll('[id^="waAuto_"]');
+  var cfg = {};
+  els.forEach(function(el){ cfg[el.id.replace('waAuto_','')] = el.type==='checkbox'?el.checked:el.value; });
+  await dbSet('waAutomacoes', cfg);
+  toast('Automações salvas!','ok');
+  await auditLog('config','Automações WA salvas');
+}
+
+async function renderWA() {
+  await seedTemplatesWA();
+  // Carregar config da empresa
+  window._empresaConfig = await dbGet('empresa') || {};
+  // Carregar config Evolution API
+  var evoDb = await dbGet('config') || {};
+  if (evoDb.evolutionUrl) {
+    window._evoConfig = { url: evoDb.evolutionUrl, key: evoDb.evolutionKey||'', instancia: evoDb.evolutionInstancia||'' };
+  }
+  // Ativar aba Enviar por padrão
+  showWATab('enviar', document.querySelector('#waTabs .ptab'));
+  renderWATemplates();
+}
+
+async function reenviarWA(tel, tplNomeEnc) {
+  var tplNome = decodeURIComponent(tplNomeEnc);
+  var tpl = _waTpls.find(function(t){ return t.nome===tplNome; });
+  if (!tpl) return toast('Template não encontrado','err');
+  var clis = await dbGet('clientes') || [];
+  var cli = clis.find(function(c){ return (c.telefone||'').replace(/\D/g,'')===tel.replace(/\D/g,''); });
+  if (!cli) cli = {nome:'Cliente', telefone:tel};
+  _waCli = cli; _waTpl = _waTpls.indexOf(tpl);
+  var msg = substituirVarsWA(tpl.msg, cli, null, window._empresaConfig||{});
+  abrirWAWeb(msg);
+}
+
+// helper para escapar HTML
+function escHtml(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* FIM WHATSAPP */
 
 async function renderDash(){
   const [cl,ag,fin,sv]=[await dbGet('clientes'),await dbGet('agendamentos'),await dbGet('financeiro'),await dbGet('servicos')];
@@ -5617,8 +6442,14 @@ async function carregarRoleUsuario() {
     var userRole = roles[key];
     
     if (!userRole || !userRole.tipo) {
-      // Sem role definida = ADM1 (primeiro usuario)
-      window._userRole = 'adm1';
+      // Sem role definida no tenant — usa o role do userTenants como fallback
+      // window._userRole vem do login: 'admin' → adm1, 'operador' → operador
+      var loginRole = window._userRole || 'admin';
+      if (loginRole === 'operador') {
+        window._userRole = 'operador';
+      } else {
+        window._userRole = 'adm1'; // admin/dono = acesso total
+      }
     } else {
       window._userRole = userRole.tipo; // 'adm1', 'adm2', 'operador'
     }
@@ -5999,7 +6830,9 @@ function showManualTab(tab, btn) {
   document.querySelectorAll('[id^="manualTab-"]').forEach(function(el){ el.style.display='none'; });
   var el = document.getElementById('manualTab-' + tab);
   if (el) el.style.display = '';
-  document.querySelectorAll('#page-manual .ptab').forEach(function(b){ b.classList.remove('active'); });
+  // Reseta botões ativos no contexto do Admin ou do page-manual legado
+  var parent = el ? el.closest('[id^="adminTab-"], #page-manual') : null;
+  if (parent) parent.querySelectorAll('.ptab').forEach(function(b){ b.classList.remove('active'); });
   if (btn) btn.classList.add('active');
 }
 
@@ -6145,30 +6978,6 @@ window.refreshTotais = async function() {
   if (activePage === 'page-caixa')      await renderCaixa();
   if (activePage === 'page-relatorios') await renderRelatorios();
 };
-
-// Compatibilidade: garantir que _evoConfig existe
-if (typeof window._evoConfig === 'undefined') window._evoConfig = null;
-if (typeof window._evoConectado === 'undefined') window._evoConectado = false;
-
-// Garantir que aplicarPermissoes seja chamado com segurança
-var _origInitApp = typeof initApp === 'function' ? initApp : null;
-if (_origInitApp) {
-  initApp = async function() {
-    try {
-      await _origInitApp();
-    } catch(e) {
-      console.error('initApp error:', e);
-      // Mesmo com erro, tentar renderizar o dashboard
-      try { await renderDash(); } catch(e2) {}
-    }
-    // Aplicar permissões após init
-    try {
-      if (window._userRole && typeof aplicarPermissoes === 'function') {
-        aplicarPermissoes(window._userRole);
-      }
-    } catch(e) {}
-  };
-}
 
 // Adicionar CNPJ mask ao campo
 document.addEventListener('DOMContentLoaded', function() {
