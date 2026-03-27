@@ -1318,9 +1318,7 @@ body.light .badge{opacity:.9}
         <table><thead><tr><th>E-mail</th><th>Nível</th><th>Último Acesso</th><th>Dispositivo</th><th>Status</th><th>Ações</th></tr></thead>
         <tbody id="usersAdminBody"></tbody></table>
         <div style="padding:12px 18px;font-size:11px;color:var(--muted2);border-top:1px solid var(--border)">
-          💡 Para cadastrar novos usuários, acesse o 
-          <a href="https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/users" target="_blank" style="color:var(--accent)">Firebase Console → Authentication</a>.
-          O status online é rastreado em tempo real via Firebase.
+          💡 Funcionários cadastrados aqui recebem acesso automático ao sistema. O limite de funcionários é definido pelo seu plano de assinatura.
         </div>
       </div>
     </div>
@@ -2746,6 +2744,70 @@ body.light .badge{opacity:.9}
   </div>
 </div>
 
+<div class="mbg" id="mNovoUser">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title">NOVO FUNCIONÁRIO</div>
+    <div style="font-size:11px;color:var(--muted2);margin-bottom:12px">Uso: <span id="nu_limite">—</span></div>
+    <div class="fgrid c1">
+      <div class="fg"><label>Nome Completo *</label><input id="nu_nome" placeholder="Ex: Maria Silva"></div>
+      <div class="fg"><label>E-mail *</label><input type="email" id="nu_email" placeholder="funcionario@email.com"></div>
+      <div class="fg"><label>Senha *</label><input type="password" id="nu_senha" placeholder="Mínimo 6 caracteres"></div>
+      <div class="fg"><label>Nível de Acesso</label>
+        <select id="nu_role">
+          <option value="operador">Operador — acesso básico</option>
+          <option value="adm2">ADM Gestão — sem configurações</option>
+          <option value="adm1">ADM Geral — acesso total</option>
+        </select>
+      </div>
+    </div>
+    <div id="nu_errmsg" style="display:none;color:var(--red);font-size:12px;margin-top:8px;padding:8px;background:rgba(255,82,82,.08);border-radius:6px"></div>
+    <div id="nu_result" style="display:none;font-size:12px;margin-top:8px;padding:8px;background:rgba(105,240,174,.08);border:1px solid rgba(105,240,174,.25);border-radius:6px"></div>
+    <div class="mfoot">
+      <button class="btn btn-primary" id="nu_btn" onclick="salvarNovoUser()">✓ Criar Funcionário</button>
+      <button class="btn btn-ghost" onclick="fecharM('mNovoUser')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<div class="mbg" id="mFechamentoCaixa">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">FECHAMENTO DO CAIXA</div>
+    <!-- Resumo do sistema -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">ENTRADAS</div><div style="color:var(--green);font-weight:700" id="fc_entradas">—</div></div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">SAÍDAS</div><div style="color:var(--red);font-weight:700" id="fc_saidas">—</div></div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">SALDO SISTEMA</div><div style="color:var(--accent);font-weight:700;font-size:16px" id="fc_saldo_sistema">—</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted2);margin-bottom:8px" id="fc_servicos"></div>
+    <!-- Contagem de cédulas -->
+    <div style="font-size:11px;letter-spacing:1px;color:var(--muted2);margin-bottom:8px;margin-top:4px">CONTAGEM DE CÉDULAS E MOEDAS</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+      <div class="fg"><label>R$ 200</label><input type="number" id="ced_200" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>R$ 100</label><input type="number" id="ced_100" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>R$ 50</label><input type="number" id="ced_50" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>R$ 20</label><input type="number" id="ced_20" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>R$ 10</label><input type="number" id="ced_10" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>R$ 5</label><input type="number" id="ced_5" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>R$ 2</label><input type="number" id="ced_2" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>R$ 1</label><input type="number" id="ced_1" min="0" placeholder="0" oninput="_atualizarTotalConferencia()"></div>
+    </div>
+    <div class="fgrid c3" style="margin-bottom:14px">
+      <div class="fg"><label>Moedas (R$)</label><input type="number" id="ced_moedas" min="0" step="0.01" placeholder="0.00" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>Maquininha (R$)</label><input type="number" id="fc_maquininha" min="0" step="0.01" placeholder="0.00" oninput="_atualizarTotalConferencia()"></div>
+      <div class="fg"><label>PIX (R$)</label><input type="number" id="fc_pix" min="0" step="0.01" placeholder="0.00" oninput="_atualizarTotalConferencia()"></div>
+    </div>
+    <!-- Totais -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">TOTAL CONTADO</div><div style="color:var(--text);font-weight:700;font-size:18px" id="fc_total_contagem">R$ 0,00</div></div>
+      <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">DIFERENÇA</div><div style="font-weight:700;font-size:18px" id="fc_diferenca">R$ 0,00</div></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn btn-danger" onclick="_executarFechamentoCaixa()">■ Confirmar Fechamento</button>
+      <button class="btn btn-ghost" onclick="fecharM('mFechamentoCaixa')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <div class="mbg" id="mRole">
   <div class="modal">
     <div class="modal-title">NÍVEL DE ACESSO</div>
@@ -2910,12 +2972,15 @@ window.addEventListener('firebaseReady', () => {
 // ── DATA LAYER ──────────────────────────────
 async function dbGet(key) {
   const tid = window._tenantId;
-  if (!tid) { console.warn('dbGet("'+key+'") chamado sem tenantId — ignorado'); return (['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas'].includes(key)) ? {} : []; }
+  const OBJ_KEYS = ['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas','caixaDia','evolutionConfig','waAutomacoes'];
+  if (!tid) { console.warn('dbGet("'+key+'") chamado sem tenantId — ignorado'); return OBJ_KEYS.includes(key) ? {} : []; }
   if (isFB && window._db) {
     try {
       const snap = await window._fbGet(window._fbRef(window._db, 'tenants/' + tid + '/' + key));
       const val = snap.val();
-      if (val === null) return (['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas'].includes(key)) ? {} : [];
+      if (val === null) return OBJ_KEYS.includes(key) ? {} : [];
+      // Chaves que devem sempre retornar objeto raw (nunca Object.values)
+      if (OBJ_KEYS.includes(key)) return (typeof val === 'object' && !Array.isArray(val)) ? val : val;
       return Array.isArray(val) ? val : (typeof val === 'object' ? Object.values(val) : val);
     } catch(e) { return lsGet(key); }
   }
@@ -3044,6 +3109,21 @@ async function initApp() {
   const regras = await dbGet('regras');
   if (!regras || !regras.pts50) await dbSet('regras',{pts50:50,pts100:100,pts200:200,estMin:2,estCrit:0,descMax:30,descAprov:20,togFin:true,togFid:true,togEst:true});
 
+  // Seed de templates WhatsApp padrão para estéticas
+  const waTpls = await dbGet('waTemplates');
+  if (!waTpls || !waTpls.length) await dbSet('waTemplates', [
+    {id:1,nome:'Boas-vindas',categoria:'Personalizada',msg:'Olá {nome}! 🌟 Bem-vindo(a) à {empresa}!\n\nFicamos felizes em ter você conosco. Estamos aqui para cuidar de você com todo carinho e profissionalismo.\n\nQualquer dúvida, é só chamar! 😊'},
+    {id:2,nome:'Confirmação de Agendamento',categoria:'Confirmação',msg:'Olá {nome}! ✅\n\nSeu agendamento na {empresa} está confirmado:\n\n📅 Data: {data}\n🕐 Hora: {hora}\n💅 Serviço: {servico}\n💰 Valor: {valor}\n\nTe esperamos! 💛'},
+    {id:3,nome:'Lembrete 1 dia antes',categoria:'Lembrete',msg:'Oi {nome}! 👋\n\nLembrando que amanhã você tem horário na {empresa}:\n\n📅 {data} às {hora}\n💅 {servico}\n\nNos vemos em breve! 😍'},
+    {id:4,nome:'Lembrete no dia',categoria:'Lembrete',msg:'Bom dia {nome}! ☀️\n\nHoje é dia do seu horário na {empresa}!\n\n🕐 {hora} — {servico}\n\nEstamos te esperando com tudo preparado. 💛'},
+    {id:5,nome:'Serviço Concluído',categoria:'Conclusão',msg:'Olá {nome}! 🌸\n\nFoi um prazer atender você hoje na {empresa}!\n\n✨ Serviço: {servico}\n\nEsperamos que tenha amado o resultado. Nos veja em breve! 💛\n\nAvalie nosso atendimento e indique para amigas! 🙏'},
+    {id:6,nome:'Promoção / Novidade',categoria:'Promoção',msg:'Oi {nome}! 🎉\n\nTemos uma novidade especial pra você na {empresa}!\n\nAproveite nossas promoções e agende já seu horário. 💅✨\n\nAcesse agora e garanta sua vaga! 😍'},
+    {id:7,nome:'Aniversário',categoria:'Aniversário',msg:'🎂 Feliz Aniversário, {nome}!\n\nA equipe da {empresa} deseja um dia incrível cheio de alegria e amor! 🎊\n\nComo presente, temos um mimo especial esperando por você. Venha nos visitar! 💛🌸'},
+    {id:8,nome:'Retorno de cliente inativo',categoria:'Inativo',msg:'Sentimos sua falta, {nome}! 🥺\n\nFaz um tempinho que não te vemos por aqui na {empresa}.\n\nQue tal agendar um horário? Temos novidades te esperando! 💅✨'},
+    {id:9,nome:'Pontos de Fidelidade',categoria:'Fidelidade',msg:'Olá {nome}! 🌟\n\nVocê acumulou {pontos} pontos no programa de fidelidade da {empresa}!\n\nContinue visitando e troque seus pontos por descontos e benefícios exclusivos. 💛'},
+    {id:10,nome:'Cobrança / Pagamento Pendente',categoria:'Personalizada',msg:'Olá {nome}, tudo bem?\n\nPassando para lembrar que há um pagamento pendente na {empresa} referente ao serviço de {servico}.\n\nQualquer dúvida, estamos à disposição! 😊'},
+  ]);
+
   // Verificar se usuário é admin — usa window._userRole definido no login (via userTenants)
   const email = window._currentAuthUser?.email || '';
   const userRole = window._userRole || 'admin';
@@ -3072,6 +3152,7 @@ async function initApp() {
   renderDash();
   verificarCaixaAberto();
   iniciarPresencaRealtime();
+  iniciarRotinaCaixa();
   // Carregar configuração da Evolution API
   (async function(){
     try {
@@ -4527,32 +4608,100 @@ async function renderCaixaChart7d(){
     return `<div class="bi"><div class="bv">${vals[i]>0?'R$'+Math.round(vals[i]):''}</div><div class="bar" style="height:${Math.max(pct,2)}%;background:var(--green)"></div><div class="blbl">${lbl}</div></div>`;
   }).join('');
 }
-async function abrirCaixa(){
-  if(!confirm('Confirma abertura do caixa?'))return;
+async function abrirCaixa(automatico){
+  if(!automatico && !confirm('Confirma abertura do caixa?'))return;
   const caixaDia = await dbGet('caixaDia') || {};
-  caixaDia.aberto = true;
-  caixaDia.dataAbertura = today();
-  caixaDia.horaAbertura = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-  caixaDia.operadorAbertura = window._currentAuthUser?.email||'—';
-  if(!caixaDia.movimentacoes) caixaDia.movimentacoes = [];
-  await dbSet('caixaDia', caixaDia);
-  await auditLog('caixa','Caixa ABERTO');
-  renderCaixa();toast('Caixa aberto!','ok');
+  if(caixaDia.aberto && caixaDia.dataAbertura===today()){if(!automatico)toast('Caixa já está aberto!','warn');return;}
+  const novo = {aberto:true,dataAbertura:today(),horaAbertura:new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),operadorAbertura:automatico?'Sistema (automático)':(window._currentAuthUser?.email||'—'),movimentacoes:caixaDia.movimentacoes||[]};
+  await dbSet('caixaDia', novo);
+  await auditLog('caixa', automatico?'Caixa ABERTO automaticamente (06:00)':'Caixa ABERTO pelo operador');
+  renderCaixa();
+  if(!automatico) toast('Caixa aberto!','ok');
 }
-async function fecharCaixa(){
+function fecharCaixa(){
+  // Abre modal de conferência ao invés de fechar direto
+  abrirModalFechamentoCaixa();
+}
+async function _executarFechamentoCaixa(){
   const caixaDia = await dbGet('caixaDia') || {};
   const movs = (caixaDia.movimentacoes||[]).filter(m=>m.data===today());
   const ent = movs.filter(m=>m.tipo==='entrada').reduce((s,m)=>s+Number(m.valor||0),0);
   const sai = movs.filter(m=>m.tipo==='saida').reduce((s,m)=>s+Number(m.valor||0),0);
-  if(!confirm(`Fechar caixa?\n\nEntradas: ${fmt(ent)}\nSaídas: ${fmt(sai)}\nSaldo: ${fmt(ent-sai)}`))return;
+  // Coletar dados da conferência
+  const cedulas = ['200','100','50','20','10','5','2','1'];
+  let totalCedulas = 0;
+  cedulas.forEach(v=>{ const q=parseInt(document.getElementById('ced_'+v)?.value||0)||0; totalCedulas+=q*(v==='1'?1:Number(v)); });
+  const totalMoedas = parseFloat(document.getElementById('ced_moedas')?.value||0)||0;
+  const totalMaq = parseFloat(document.getElementById('fc_maquininha')?.value||0)||0;
+  const totalPix = parseFloat(document.getElementById('fc_pix')?.value||0)||0;
+  const totalFisico = totalCedulas+totalMoedas;
   caixaDia.aberto = false;
   caixaDia.dataFechamento = today();
   caixaDia.horaFechamento = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
   caixaDia.operadorFechamento = window._currentAuthUser?.email||'—';
-  caixaDia.saldoFechamento = ent - sai;
+  caixaDia.saldoFechamento = ent-sai;
+  caixaDia.conferencia = {totalCedulas,totalMoedas,totalFisico,totalMaq,totalPix,totalGeral:totalFisico+totalMaq+totalPix,saldoSistema:ent-sai,diferenca:(totalFisico+totalMaq+totalPix)-(ent-sai)};
   await dbSet('caixaDia', caixaDia);
-  await auditLog('caixa',`Caixa FECHADO — saldo: ${fmt(ent-sai)}`);
-  renderCaixa();toast('Caixa fechado! Saldo: '+fmt(ent-sai),'ok');
+  await auditLog('caixa',`Caixa FECHADO — saldo sistema: ${fmt(ent-sai)} | contagem: ${fmt(totalFisico+totalMaq+totalPix)} | diferença: ${fmt((totalFisico+totalMaq+totalPix)-(ent-sai))}`);
+  fecharM('mFechamentoCaixa');
+  renderCaixa();
+  toast(`Caixa fechado! Saldo: ${fmt(ent-sai)}`,'ok');
+}
+async function abrirModalFechamentoCaixa(){
+  const caixaDia = await dbGet('caixaDia') || {};
+  const movs = (caixaDia.movimentacoes||[]).filter(m=>m.data===today());
+  const ent = movs.filter(m=>m.tipo==='entrada').reduce((s,m)=>s+Number(m.valor||0),0);
+  const sai = movs.filter(m=>m.tipo==='saida').reduce((s,m)=>s+Number(m.valor||0),0);
+  const agTodos = await dbGet('agendamentos')||[];
+  const svHoje = agTodos.filter(a=>a.data===today()&&a.status==='Concluído');
+  document.getElementById('fc_saldo_sistema').textContent = fmt(ent-sai);
+  document.getElementById('fc_entradas').textContent = fmt(ent);
+  document.getElementById('fc_saidas').textContent = fmt(sai);
+  document.getElementById('fc_servicos').textContent = svHoje.length+' serviços ('+fmt(svHoje.reduce((s,a)=>s+Number(a.valorFinal||a.valor||0),0))+')';
+  ['200','100','50','20','10','5','2','1','moedas'].forEach(v=>{ const el=document.getElementById('ced_'+v); if(el) el.value=''; });
+  ['maquininha','pix'].forEach(v=>{ const el=document.getElementById('fc_'+v); if(el) el.value=''; });
+  _atualizarTotalConferencia();
+  document.getElementById('mFechamentoCaixa').classList.add('open');
+}
+function _atualizarTotalConferencia(){
+  const cedulas = ['200','100','50','20','10','5','2','1'];
+  let totalCedulas = 0;
+  cedulas.forEach(v=>{ const q=parseInt(document.getElementById('ced_'+v)?.value||0)||0; totalCedulas+=q*(v==='1'?1:Number(v)); });
+  const totalMoedas = parseFloat(document.getElementById('ced_moedas')?.value||0)||0;
+  const totalMaq = parseFloat(document.getElementById('fc_maquininha')?.value||0)||0;
+  const totalPix = parseFloat(document.getElementById('fc_pix')?.value||0)||0;
+  const total = totalCedulas+totalMoedas+totalMaq+totalPix;
+  const el = document.getElementById('fc_total_contagem');
+  if(el) el.textContent = fmt(total);
+  const dif = document.getElementById('fc_diferenca');
+  if(dif){
+    // buscar saldo sistema
+    const ss = parseFloat((document.getElementById('fc_saldo_sistema')?.textContent||'0').replace(/[^0-9\-,]/g,'').replace(',','.'));
+    const diff = total-ss;
+    dif.textContent = (diff>0?'+':'')+fmt(diff);
+    dif.style.color = diff===0?'var(--green)':diff>0?'var(--yellow)':'var(--red)';
+  }
+}
+// Rotina de auto-abertura/fechamento do caixa
+function iniciarRotinaCaixa(){
+  function verificarHoraCaixa(){
+    const h = new Date().getHours(), m = new Date().getMinutes();
+    if(h===6&&m===0) abrirCaixa(true);
+    if(h===23&&m===59) _fechamentoAutomaticoCaixa();
+  }
+  setInterval(verificarHoraCaixa, 60000);
+}
+async function _fechamentoAutomaticoCaixa(){
+  const caixaDia = await dbGet('caixaDia')||{};
+  if(!caixaDia.aberto) return;
+  const movs=(caixaDia.movimentacoes||[]).filter(m=>m.data===today());
+  const ent=movs.filter(m=>m.tipo==='entrada').reduce((s,m)=>s+Number(m.valor||0),0);
+  const sai=movs.filter(m=>m.tipo==='saida').reduce((s,m)=>s+Number(m.valor||0),0);
+  caixaDia.aberto=false;caixaDia.dataFechamento=today();caixaDia.horaFechamento='23:59';
+  caixaDia.operadorFechamento='Sistema (automático)';caixaDia.saldoFechamento=ent-sai;
+  await dbSet('caixaDia',caixaDia);
+  await auditLog('caixa',`Caixa FECHADO automaticamente (23:59) — saldo: ${fmt(ent-sai)}`);
+  renderCaixa(); toast('Caixa fechado automaticamente (23:59)','info');
 }
 async function lancarNoCaixa(valor, desc, pgto, cat){
   try {
@@ -5529,7 +5678,57 @@ async function salvarRole(){
   fecharM('mRole');renderAcesso();toast('Nível salvo!','ok');
 }
 async function excluirRole(key){if(!confirm('Excluir nível?'))return;const roles=await dbGet('roles')||{};delete roles[key];await dbSet('roles',roles);await auditLog('delete','Nível excluído: '+key);renderAcesso();toast('Removido.','info')}
-function abrirModalNovoUser(){window.open('https://console.firebase.google.com/project/gbr-sistemas-saas/authentication/users','_blank')}
+async function abrirModalNovoUser(){
+  // Verificar limite de funcionários da licença
+  const licPlan = (window._planoAtual||'basico').toLowerCase();
+  const snapPlano = await window._fbGet(window._fbRef(window._db,'planos/'+licPlan));
+  const planoData = snapPlano.val()||{};
+  const maxFunc = planoData.maxFuncionarios || (licPlan==='trial'?2:licPlan==='basico'?5:licPlan==='profissional'?15:999);
+  // Contar funcionários atuais via presença/roles
+  const presenza = await dbGet('presence')||{};
+  const atualCount = Object.keys(presenza).length;
+  if(atualCount >= maxFunc){
+    return toast(`⛔ Limite de ${maxFunc} funcionários atingido para o plano ${licPlan.toUpperCase()}. Faça upgrade para adicionar mais.`,'err');
+  }
+  document.getElementById('nu_email').value='';
+  document.getElementById('nu_senha').value='';
+  document.getElementById('nu_nome').value='';
+  document.getElementById('nu_role').value='operador';
+  document.getElementById('nu_limite').textContent=`${atualCount} / ${maxFunc} funcionários`;
+  document.getElementById('nu_result').style.display='none';
+  document.getElementById('nu_errmsg').style.display='none';
+  document.getElementById('mNovoUser').classList.add('open');
+}
+async function salvarNovoUser(){
+  const email=document.getElementById('nu_email').value.trim();
+  const senha=document.getElementById('nu_senha').value;
+  const nome=document.getElementById('nu_nome').value.trim();
+  const role=document.getElementById('nu_role').value;
+  if(!email||!senha||!nome) return toast('Preencha todos os campos','err');
+  if(senha.length<6) return toast('Senha mínimo 6 caracteres','err');
+  const btn=document.getElementById('nu_btn');btn.disabled=true;btn.textContent='Criando...';
+  document.getElementById('nu_errmsg').style.display='none';
+  try{
+    const apiKey='AIzaSyAdn8IUIWhZUhvHNAg5jEYAPwtCSaQbKA0';
+    const res=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key='+apiKey,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:senha,returnSecureToken:false})});
+    const data=await res.json();
+    if(data.error){
+      const msg=data.error.message==='EMAIL_EXISTS'?'Este e-mail já está cadastrado':data.error.message;
+      throw new Error(msg);
+    }
+    // Vincular ao tenant atual
+    const emailKey=email.replace(/\./g,'_').replace(/@/g,'__');
+    await window._fbSet(window._fbRef(window._db,'userTenants/'+emailKey),{tenantId:window._tenantId,role,criadoEm:new Date().toISOString(),nomeCompleto:nome});
+    await auditLog('config',`Novo funcionário criado: ${email} (${role})`);
+    document.getElementById('nu_result').innerHTML=`<b style="color:var(--green)">✅ Funcionário cadastrado!</b><br>E-mail: ${email}<br>Nível: ${role}`;
+    document.getElementById('nu_result').style.display='block';
+    toast('Funcionário cadastrado com sucesso!','ok');
+    renderAcesso();
+  }catch(e){
+    document.getElementById('nu_errmsg').textContent='❌ '+e.message;
+    document.getElementById('nu_errmsg').style.display='block';
+  }finally{btn.disabled=false;btn.textContent='✓ Criar Funcionário';}
+}
 
 // ── REGRAS ───────────────────────────────────
 async function carregarRegras(){
