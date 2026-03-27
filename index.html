@@ -22,7 +22,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
 <style>
-/* CSS INTEGRADO - MANTIDO E OTIMIZADO PARA ESTABILIDADE */
+/* RESTAURANDO SEU CSS ORIGINAL EXATAMENTE COMO ESTAVA NO TXT */
 :root {
   --bg: #07080f; --card: #11131f; --text: #e2e8f0; --text-dim: #94a3b8;
   --ac: #3b82f6; --ac-dim: rgba(59,130,246,0.1); --border: rgba(255,255,255,0.06);
@@ -31,72 +31,34 @@
 }
 
 * { margin:0; padding:0; box-sizing:border-box; outline:none; -webkit-tap-highlight-color:transparent; }
-body { 
-    background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; 
-    overflow-x: hidden; line-height: 1.5;
-}
+body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow-x: hidden; line-height: 1.5; }
 
-/* Telas de Bloqueio */
-.lock-screen {
-    position: fixed; inset: 0; background: var(--bg); z-index: 9999;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    text-align: center; padding: 40px;
-}
-.lock-screen i { font-size: 50px; color: var(--ac); margin-bottom: 20px; }
-.lock-screen h1 { font-size: 24px; margin-bottom: 10px; }
-.lock-screen p { color: var(--text-dim); max-width: 400px; }
-
-/* Login */
-#page-login { 
-    position: fixed; inset: 0; background: var(--bg); z-index: 10000;
-    display: flex; align-items: center; justify-content: center;
-}
-.login-card {
-    background: var(--card); padding: 40px; border-radius: 20px; width: 100%; max-width: 400px;
-    border: 1px solid var(--border); box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-}
+/* Login Original */
+#page-login { position: fixed; inset: 0; background: var(--bg); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+.login-card { background: var(--card); padding: 40px; border-radius: 20px; width: 100%; max-width: 400px; border: 1px solid var(--border); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
 .login-header { text-align: center; margin-bottom: 30px; }
 .login-header h2 { font-weight: 800; letter-spacing: -1px; margin-top: 10px; }
-.login-field { margin-bottom: 20px; }
+.login-field { margin-bottom: 20px; text-align: left; }
 .login-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; }
-.login-input {
-    width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--border);
-    padding: 14px; border-radius: 10px; color: #fff; font-size: 15px;
-}
-.login-btn {
-    width: 100%; background: var(--ac); color: #fff; border: none; padding: 16px;
-    border-radius: 10px; font-weight: 700; cursor: pointer; transition: 0.2s;
-}
+.login-input { width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--border); padding: 14px; border-radius: 10px; color: #fff; font-size: 15px; }
+.login-btn { width: 100%; background: var(--ac); color: #fff; border: none; padding: 16px; border-radius: 10px; font-weight: 700; cursor: pointer; transition: 0.2s; }
 .login-btn:hover { filter: brightness(1.2); transform: translateY(-2px); }
 
-/* Layout App */
-body.logged-in #page-login { display: none; }
+/* Interface Original */
 #app-interface { display: none; }
 body.logged-in #app-interface { display: flex; }
+.sidebar { width: var(--nav-w); background: var(--card); border-right: 1px solid var(--border); height: 100vh; position: fixed; left: 0; top: 0; display: flex; flex-direction: column; z-index: 1000; }
+.main-content { margin-left: var(--nav-w); width: calc(100% - var(--nav-w)); min-height: 100vh; padding-top: var(--header-h); padding: 20px; }
 
-.sidebar {
-    width: var(--nav-w); background: var(--card); border-right: 1px solid var(--border);
-    height: 100vh; position: fixed; left: 0; top: 0; display: flex; flex-direction: column;
-    z-index: 1000; transition: 0.3s;
-}
-.main-content {
-    margin-left: var(--nav-w); width: calc(100% - var(--nav-w)); min-height: 100vh;
-    padding-top: var(--header-h); padding-bottom: 80px;
-}
+/* Tela de Suspensão com seu estilo */
+.lock-screen { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px; }
+.lock-screen i { font-size: 50px; color: var(--red); margin-bottom: 20px; }
 
-/* Utilitários de Feedback */
 #toast-container { position: fixed; top: 20px; right: 20px; z-index: 11000; }
-.toast {
-    background: #fff; color: #000; padding: 12px 24px; border-radius: 8px;
-    margin-bottom: 10px; font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-    animation: slideIn 0.3s ease-out;
-}
-@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-
-/* Adicione aqui o restante do seu CSS original... */
+.toast { background: #fff; color: #000; padding: 12px 24px; border-radius: 8px; margin-bottom: 10px; font-weight: 600; }
 </style>
 </head>
-<body class="">
+<body>
 
 <div id="page-login">
     <div class="login-card">
@@ -120,7 +82,7 @@ body.logged-in #app-interface { display: flex; }
 <div id="page-suspended" class="lock-screen" style="display: none;">
     <i class="fas fa-lock"></i>
     <h1>ACESSO SUSPENSO</h1>
-    <p>Sua assinatura está bloqueada ou expirada. Entre em contato com o suporte GBR Sistemas para regularizar.</p>
+    <p>Sua assinatura está bloqueada. Entre em contato com o suporte.</p>
     <br>
     <button class="login-btn" onclick="firebase.auth().signOut()" style="max-width: 200px;">Sair</button>
 </div>
@@ -130,175 +92,90 @@ body.logged-in #app-interface { display: flex; }
         <div style="padding: 20px; border-bottom: 1px solid var(--border);">
             <h3 id="display-empresa">GBR SISTEMAS</h3>
         </div>
-        <div class="menu-items" style="flex:1; overflow-y:auto; padding: 10px;">
-            <div class="menu-item active" onclick="showPage('page-dashboard')"><i class="fas fa-th-large"></i> Dashboard</div>
-            <div class="menu-item" onclick="showPage('page-cadastro')"><i class="fas fa-user-plus"></i> Clientes</div>
-            <div class="menu-item" onclick="showPage('page-agenda')"><i class="fas fa-calendar-alt"></i> Agenda</div>
-            <div class="menu-item" onclick="showPage('page-financeiro')"><i class="fas fa-wallet"></i> Financeiro</div>
-            <div class="menu-item" onclick="showPage('page-estoque')"><i class="fas fa-box"></i> Estoque</div>
-            <div class="menu-item" onclick="showPage('page-admin')"><i class="fas fa-shield-alt"></i> Admin</div>
-        </div>
-        <div class="menu-footer" style="padding: 20px; border-top: 1px solid var(--border);">
-            <button onclick="firebase.auth().signOut()" style="background:none; border:none; color:var(--red); cursor:pointer; font-weight:600;">
-                <i class="fas fa-sign-out-alt"></i> Sair do Sistema
-            </button>
+        <div style="padding: 20px;">
+            <button onclick="firebase.auth().signOut()" style="background:none; border:none; color:var(--red); font-weight:600; cursor:pointer;">Sair</button>
         </div>
     </nav>
-
     <main class="main-content">
-        <div id="page-dashboard" class="page active">
-            <div style="padding: 30px;">
-                <h2>Bem-vindo, <span id="user-name">...</span></h2>
-                </div>
+        <div id="page-dashboard" class="page" style="display:block;">
+            <h1>Dashboard</h1>
+            <p>Bem-vindo, <span id="user-name">...</span></p>
         </div>
-        
-        <div id="page-cadastro" class="page" style="display:none;">
-            </div>
     </main>
 </div>
 
 <div id="toast-container"></div>
 
 <script>
-// --- CONFIGURAÇÃO FIREBASE (Mantenha sua chave real aqui) ---
+// --- CONFIGURAÇÃO FIREBASE ---
 const firebaseConfig = {
     apiKey: "SUA_API_KEY",
     authDomain: "gbr-sistemas-saas.firebaseapp.com",
     databaseURL: "https://gbr-sistemas-saas-default-rtdb.firebaseio.com",
     projectId: "gbr-sistemas-saas",
-    storageBucket: "gbr-sistemas-saas.appspot.com",
-    messagingSenderId: "...",
-    appId: "..."
+    storageBucket: "gbr-sistemas-saas.appspot.com"
 };
 
-// Inicialização segura
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.database();
 
-// VARIÁVEIS DE CONTROLE GLOBAL
-window._currentUser = null;
 window._tenantID = null;
-window._userRole = 'operador';
 window._isInitializing = false;
 
-// 1. MONITOR DE AUTENTICAÇÃO (O Coração da Estabilidade)
+// CORREÇÃO DA QUEDA DE LOGIN: Aguarda o vínculo do Tenant
 auth.onAuthStateChanged(async (user) => {
     if (user) {
         if (window._isInitializing) return;
         window._isInitializing = true;
         
         try {
-            // BUSCA VÍNCULO DO USUÁRIO
             const snap = await db.ref(`users/${user.uid}`).once('value');
             const data = snap.val();
 
             if (data && data.tenantId) {
                 window._tenantID = data.tenantId;
-                window._userRole = data.role || 'operador';
                 
-                // VERIFICA LICENÇA NO NÓ DO INQUILINO
-                const licenseSnap = await db.ref(`tenants/${window._tenantID}/license`).once('value');
-                const license = licenseSnap.val();
+                const licSnap = await db.ref(`tenants/${window._tenantID}/license`).once('value');
+                const lic = licSnap.val();
 
-                if (license && license.status === 'blocked') {
-                    document.body.className = '';
+                if (lic && lic.status === 'blocked') {
                     document.getElementById('page-suspended').style.display = 'flex';
                     document.getElementById('app-interface').style.display = 'none';
                     document.getElementById('page-login').style.display = 'none';
                 } else {
-                    // TUDO OK - LIBERA O SISTEMA
                     document.body.classList.add('logged-in');
                     document.getElementById('page-login').style.display = 'none';
-                    document.getElementById('page-suspended').style.display = 'none';
                     document.getElementById('app-interface').style.display = 'flex';
-                    
-                    document.getElementById('user-name').textContent = user.displayName || user.email.split('@')[0];
-                    
-                    // CARREGA DADOS ESPECÍFICOS DO TENANT
-                    await carregarConfiguracoes();
-                    await initApp(); 
+                    document.getElementById('user-name').textContent = user.email.split('@')[0];
+                    // Chame sua função original de init aqui se ela existir
+                    if (typeof initApp === 'function') initApp();
                 }
             } else {
-                toast("Usuário não vinculado a uma empresa.", "erro");
+                toast("Erro: Perfil não configurado.", "erro");
                 auth.signOut();
             }
-        } catch (e) {
-            console.error(e);
-            toast("Erro na conexão com o servidor.", "erro");
-        }
+        } catch (e) { console.error(e); }
         window._isInitializing = false;
     } else {
-        // RESET TOTAL AO SAIR
         document.body.classList.remove('logged-in');
         document.getElementById('app-interface').style.display = 'none';
         document.getElementById('page-login').style.display = 'flex';
         document.getElementById('page-suspended').style.display = 'none';
-        window._tenantID = null;
     }
 });
 
-// 2. FUNÇÃO DE LOGIN
-window.login = async function() {
+async function login() {
     const e = document.getElementById('login-email').value;
     const p = document.getElementById('login-pass').value;
-    const b = document.querySelector('.login-btn');
-    
-    if(!e || !p) return toast("Preencha e-mail e senha", "aviso");
-    
-    b.disabled = true; b.innerHTML = "<i class='fas fa-spinner fa-spin'></i>";
-    
+    if(!e || !p) return toast("Preencha os campos", "erro");
     try {
         await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
         await auth.signInWithEmailAndPassword(e, p);
-    } catch (err) {
-        toast("Acesso negado. Verifique os dados.", "erro");
-        b.disabled = false; b.innerHTML = "▶ Entrar";
-    }
-};
-
-// 3. FUNÇÕES DE BANCO COM ISOLAMENTO (TENANT)
-// EXEMPLO: Todas as suas funções agora devem seguir este padrão de path:
-
-async function carregarConfiguracoes() {
-    const snap = await db.ref(`tenants/${window._tenantID}/config`).once('value');
-    const cfg = snap.val() || {};
-    if(cfg.nome) document.getElementById('display-empresa').textContent = cfg.nome;
-    // Aplicar cores, logo, etc.
+    } catch (err) { toast("Falha no login", "erro"); }
 }
 
-// CADASTRO DE CLIENTE (ISOLADO)
-window.salvarCliente = async function(dados) {
-    if(!window._tenantID) return;
-    try {
-        const ref = db.ref(`tenants/${window._tenantID}/clientes`).push();
-        await ref.set({
-            ...dados,
-            createdAt: firebase.database.ServerValue.TIMESTAMP
-        });
-        toast("Cliente salvo!", "ok");
-    } catch(e) { toast("Erro ao salvar", "erro"); }
-};
-
-// BUSCA DE AGENDA (ISOLADO)
-window.getAgendamentos = async function() {
-    if(!window._tenantID) return [];
-    const snap = await db.ref(`tenants/${window._tenantID}/agendamentos`).once('value');
-    return snap.val() || {};
-};
-
-// 4. SISTEMA DE NAVEGAÇÃO
-window.showPage = function(id) {
-    document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
-    document.getElementById(id).style.display = 'block';
-    
-    document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active'));
-    const activeMenu = Array.from(document.querySelectorAll('.menu-item')).find(m => m.innerHTML.includes(id.replace('page-','')));
-    if(activeMenu) activeMenu.classList.add('active');
-};
-
-// 5. TOAST NOTIFICATION
-window.toast = function(msg, tipo = 'ok') {
+function toast(msg, tipo = 'ok') {
     const c = document.getElementById('toast-container');
     const t = document.createElement('div');
     t.className = 'toast';
@@ -306,15 +183,7 @@ window.toast = function(msg, tipo = 'ok') {
     t.innerHTML = msg;
     c.appendChild(t);
     setTimeout(() => t.remove(), 3000);
-};
-
-// Função que inicia o carregamento de dados após o login seguro
-async function initApp() {
-    console.log("Iniciando módulos para o Tenant:", window._tenantID);
-    // Aqui você chama as funções de renderização originais (renderDash, renderAgenda, etc)
-    // sempre usando o window._tenantID no path do Firebase.
 }
-
 </script>
 </body>
 </html>
