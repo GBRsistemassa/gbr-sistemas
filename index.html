@@ -1,165 +1,118 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#07080f">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="GBR Sistemas">
-  <meta name="mobile-web-app-capable" content="yes">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2307080f'/><text y='.9em' font-size='80'>🚗</text></svg>">
-<title>GBR Sistemas — Plataforma de Gestão</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+import { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { Link } from "react-router-dom";
 
-<script>
-function toast(msg, type='ok') {
-  const t = document.getElementById('toast');
-  if (!t) return;
-  const icons = {ok:'✓', err:'✕', info:'ℹ', warn:'⚠'};
-  t.innerHTML = (icons[type]||'') + ' ' + msg;
-  t.className = 'show t-' + type;
-  clearTimeout(t._tid);
-  t._tid = setTimeout(() => t.className = '', 3500);
-}
-</script>
+const fmt = (v) => "R$ " + Number(v || 0).toFixed(2).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+const today = () => new Date().toISOString().split("T")[0];
 
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-
-<script>
-  // Inicialização do Firebase [cite: 4]
-  firebase.initializeApp({
-    apiKey:"AIzaSyAdn8IUIWhZUhvHNAg5jEYAPwtCSaQbKA0",
-    authDomain:"gbr-sistemas-saas.firebaseapp.com",
-    databaseURL:"https://gbr-sistemas-saas-default-rtdb.firebaseio.com",
-    projectId:"gbr-sistemas-saas",
-    storageBucket:"gbr-sistemas-saas.firebasestorage.app",
-    messagingSenderId:"329609507285",
-    appId:"1:329609507285:web:d2c1c9ac41e6e8d8e5cd5c"
-  });
-  
-  var _fbDB=firebase.database(),_fbAuth=firebase.auth();
-  window._tenantId=null;
-  window._isInitializing=false;
-
-  // Lógica de Autenticação e Estabilidade [cite: 7, 24]
-  _fbAuth.onAuthStateChanged(async function(user){
-    if(user){
-      if(window._isInitializing) return;
-      window._isInitializing=true;
-      
-      try {
-        var emailKey=user.email.replace(/\./g,'_').replace(/@/g,'__');
-        var snapTenant=await _fbDB.ref('userTenants/'+emailKey).once('value');
-        var tenantData=snapTenant.val();
-
-        if(tenantData && tenantData.tenantId){
-          window._tenantId=tenantData.tenantId;
-          window._userRole=tenantData.role;
-          
-          // Verificação de Licença e Kill Switch [cite: 7, 8, 22]
-          var snapLic=await _fbDB.ref('tenants/'+window._tenantId+'/licenca').once('value');
-          var lic=snapLic.val()||{};
-
-          if(lic.killSwitch===true || lic.status==='inativo'){
-            document.getElementById('loginScreen').style.display='none';
-            document.getElementById('lockScreen').style.display='flex';
-            document.getElementById('lockMsg').textContent='Acesso suspenso. Entre em contato com o suporte.';
-            return;
-          }
-
-          document.getElementById('loginScreen').style.display='none';
-          document.body.classList.add('logged-in');
-          if(typeof initApp === 'function') await initApp();
-        } else {
-          toast('Usuário não vinculado.','err');
-          _fbAuth.signOut();
-        }
-      } catch(e){ console.error(e); }
-      window._isInitializing=false;
-    } else {
-      document.body.classList.remove('logged-in');
-      document.getElementById('loginScreen').style.display='flex';
-    }
-  });
-
-  // Funções de Manual Interno 
-  window.abrirManual = function(topico) {
-    const conteudos = {
-      geral: "O sistema GBR permite a gestão completa da sua estética através de agendamentos e controle financeiro.",
-      clientes: "Cadastre clientes com CPF/CNPJ para histórico detalhado e fidelidade.",
-      agenda: "Gerencie serviços e horários. O sistema calcula automaticamente o tempo de execução.",
-      caixa: "Registre todas as movimentações do dia para um fechamento preciso.",
-      estoque: "Controle produtos e insumos por unidade ou volume (ml/g).",
-      whatsapp: "Envie lembretes e promoções usando variáveis como [NOME] e [VEICULO]."
-    };
-    document.getElementById('manualBody').innerHTML = `<p>${conteudos[topico] || 'Instruções em breve.'}</p>`;
-  };
-
-  // WhatsApp Marketing Templates 
-  window.templatesMkt = [
-    { nome: "Boas-vindas", msg: "Olá [NOME], seja bem-vindo! É um prazer cuidar do seu [VEICULO]." },
-    { nome: "Lembrete", msg: "Olá [NOME], confirmamos seu horário amanhã às [HORA]. Até logo!" },
-    { nome: "Promoção", msg: "Olá [NOME], temos uma oferta especial para o seu [VEICULO] esta semana!" }
-  ];
-</script>
-
-<style>
-/* CSS Base preservado [cite: 27, 28] */
-:root{
-  --bg:#07080f;--surface:#0f1018;--accent:#4fc3f7;--text:#e8eaf6;
-  --font-d:'Bebas Neue',sans-serif;--font-b:'DM Sans',sans-serif;
-}
-body{background:var(--bg);color:var(--text);font-family:var(--font-b);}
-#loginScreen, #lockScreen {position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999}
-.page {display:none;} .page.active {display:block;}
-/* ... (Estilos originais de tabelas e botões mantidos) ... */
-</style>
-</head>
-<body>
-
-<div id="loginScreen">
-  <div class="login-box">
-    <h1 class="login-logo">GBR<span>.</span></h1>
-    <div class="lf"><label>E-mail</label><input type="email" id="loginEmail"></div>
-    <div class="lf"><label>Senha</label><input type="password" id="loginPass"></div>
-    <button id="btnLogin" class="btn" onclick="doLogin()">Entrar</button>
-  </div>
-</div>
-
-<div id="lockScreen" style="display:none;">
-  <div class="card"><h1 id="lockIcon">🔒</h1><p id="lockMsg"></p></div>
-</div>
-
-<div id="app-interface">
-  <nav id="sidebar">
-    <div class="ni active" onclick="showPage('dashboard')"><i class="fas fa-home"></i> Dashboard</div>
-    <div class="ni" onclick="showPage('clientes')"><i class="fas fa-users"></i> Clientes</div>
-    <div class="ni" onclick="showPage('admin')"><i class="fas fa-shield-alt"></i> Admin</div>
-  </nav>
-
-  <main id="main">
-    <div id="page-admin" class="page">
-      <div class="admin-nav" style="display:flex;gap:10px;margin-bottom:20px;">
-        <button onclick="showAdminTab('auditoria')">Auditoria</button>
-        <button onclick="showAdminTab('manual')">Manual</button>
-        <button onclick="showAdminTab('integracoes')">Integrações</button>
-      </div>
-      
-      <div id="admin-manual" class="admin-content">
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
-          <button onclick="abrirManual('clientes')">Clientes</button>
-          <button onclick="abrirManual('agenda')">Agenda</button>
-          <button onclick="abrirManual('whatsapp')">WhatsApp</button>
-        </div>
-        <div id="manualBody" style="margin-top:20px;padding:15px;background:var(--surface);"></div>
-      </div>
+function StatCard({ label, value, color = "blue" }) {
+  return (
+    <div className={`stat-card ${color}`}>
+      <div style={{ fontSize: 10, letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--muted2)", marginBottom: 8 }}>{label}</div>
+      <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: 2, color: color === "green" ? "var(--green)" : color === "red" ? "var(--red)" : color === "orange" ? "var(--accent2)" : "var(--accent)" }}>{value}</div>
     </div>
-  </main>
-</div>
+  );
+}
 
-</body>
-</html>
+export default function Dashboard() {
+  const [clientes, setClientes] = useState([]);
+  const [agendamentos, setAgendamentos] = useState([]);
+  const [financeiro, setFinanceiro] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const [cl, ag, fin] = await Promise.all([
+        base44.entities.Cliente.list(),
+        base44.entities.Agendamento.list(),
+        base44.entities.Financeiro.list(),
+      ]);
+      setClientes(cl);
+      setAgendamentos(ag);
+      setFinanceiro(fin);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const t = today();
+  const agHoje = agendamentos.filter((a) => a.data === t);
+  const fatHoje = agHoje.filter((a) => a.status === "Concluído").reduce((s, a) => s + (a.valor_final || 0), 0);
+  const ent = financeiro.filter((f) => f.tipo === "entrada").reduce((s, f) => s + (f.valor || 0), 0);
+  const sai = financeiro.filter((f) => f.tipo === "saida").reduce((s, f) => s + (f.valor || 0), 0);
+
+  const badgeColors = { Pendente: "gbr-badge-yellow", Agendado: "gbr-badge-blue", "Concluído": "gbr-badge-green", Cancelado: "gbr-badge-red" };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 22, display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 34, letterSpacing: 3 }}>
+            DASH<span style={{ color: "var(--accent)" }}>BOARD</span>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted2)" }}>Visão geral em tempo real</div>
+        </div>
+        <Link to="/agendamento" className="btn" style={{
+          background: "var(--accent)", color: "#000", padding: "8px 16px",
+          borderRadius: 8, textDecoration: "none", fontWeight: 600, fontSize: 12
+        }}>＋ Novo Agendamento</Link>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "var(--muted2)" }}>Carregando...</div>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20 }}>
+            <StatCard label="Total Clientes" value={clientes.length} color="blue" />
+            <StatCard label="Agenda Hoje" value={agHoje.length} color="orange" />
+            <StatCard label="Faturamento Hoje" value={fmt(fatHoje)} color="green" />
+            <StatCard label="Saldo Total" value={fmt(ent - sai)} color={(ent - sai) >= 0 ? "green" : "red"} />
+          </div>
+
+          {/* Agenda Hoje */}
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 17, letterSpacing: 2 }}>AGENDA HOJE</span>
+              <span className="gbr-badge-blue" style={{ padding: "3px 9px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{agHoje.length}</span>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "var(--surface2)" }}>
+                  {["Hora", "Cliente", "Veículo", "Serviço", "Total", "Status", "Ações"].map((h) => (
+                    <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 10, letterSpacing: "1.2px", textTransform: "uppercase", color: "var(--muted2)", fontWeight: 600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {agHoje.length ? [...agHoje].sort((a, b) => (a.hora || "").localeCompare(b.hora || "")).map((a) => (
+                  <tr key={a.id} style={{ borderTop: "1px solid var(--border)" }}>
+                    <td style={{ padding: "11px 14px", fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: "var(--accent)" }}>{a.hora}</td>
+                    <td style={{ padding: "11px 14px", fontWeight: 600 }}>{a.cliente_nome}</td>
+                    <td style={{ padding: "11px 14px", fontSize: 12, color: "var(--muted2)" }}>{a.veiculo || "—"}</td>
+                    <td style={{ padding: "11px 14px", fontSize: 12 }}>{a.nome_servicos || "—"}</td>
+                    <td style={{ padding: "11px 14px", fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: "var(--green)" }}>{fmt(a.valor_final || 0)}</td>
+                    <td style={{ padding: "11px 14px" }}>
+                      <span className={badgeColors[a.status] || "gbr-badge-blue"} style={{ padding: "3px 9px", borderRadius: 20, fontSize: 10, fontWeight: 700, display: "inline-block" }}>{a.status || "Agendado"}</span>
+                    </td>
+                    <td style={{ padding: "11px 14px" }}>
+                      <button
+                        onClick={async () => {
+                          await base44.entities.Agendamento.update(a.id, { status: "Concluído" });
+                          const ag2 = await base44.entities.Agendamento.list();
+                          setAgendamentos(ag2);
+                        }}
+                        style={{ background: "var(--green)", color: "#000", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                      >✓</button>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan={7} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>Nenhum agendamento hoje</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
