@@ -261,6 +261,23 @@ function toast(msg, type='ok') {
     }catch(e){}
   }
 
+  // Detectar link público de agendamento ?book=tenantId
+  (function(){
+    var params = new URLSearchParams(window.location.search);
+    var bookId = params.get('book');
+    if (bookId) {
+      window._skipAuth = true;
+      // Aguardar DOM pronto então iniciar booking público
+      document.addEventListener('DOMContentLoaded', function(){
+        iniciarBookingPublico(bookId);
+      });
+      // Se DOM já pronto
+      if (document.readyState !== 'loading') {
+        setTimeout(function(){ iniciarBookingPublico(bookId); }, 100);
+      }
+    }
+  })();
+
   window.logout=function(){
     if(!confirm('Deseja sair?'))return;
     if(typeof auditLog==='function')auditLog('logout','Sessao encerrada');
@@ -705,10 +722,161 @@ body.light .badge{opacity:.9}
   <div class="ni" id="adminMenuItem" style="display:none" onclick="goTo('admin')"><span class="ico">🛡</span>Painel Admin</div>
   <div class="ns">Sistema</div>
   <div class="ni" data-modulo="whatsapp" onclick="goTo('whatsapp')"><span class="ico">💬</span>WhatsApp</div>
+  <div class="ns">Ajuda</div>
+  <div class="ni" onclick="goTo('suporte')"><span class="ico">🎧</span>Suporte <span class="nbadge nb-red" id="navSupBadge" style="display:none">!</span></div>
 </div>
 
 <!-- MAIN -->
 <div id="main">
+
+  <!-- ══════ AGENDAMENTO PÚBLICO (sem login) ══════ -->
+  <div id="bookingPublico" style="display:none;position:fixed;inset:0;z-index:99990;background:var(--bg);overflow-y:auto;padding:0">
+    <div style="max-width:540px;margin:0 auto;padding:24px 16px 80px">
+      <!-- Header -->
+      <div style="text-align:center;margin-bottom:28px;padding-top:20px">
+        <div style="font-family:var(--font-d);font-size:36px;letter-spacing:4px;color:var(--accent)" id="bkpEmpNome">GBR SISTEMAS</div>
+        <div style="font-size:13px;color:var(--muted2);margin-top:4px">Agendamento Online</div>
+      </div>
+
+      <!-- Progresso -->
+      <div style="display:flex;justify-content:center;gap:6px;margin-bottom:24px" id="bkpSteps">
+        <div class="bkp-step active" data-step="1" style="display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#000;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">1</div>
+          <div style="font-size:10px;color:var(--muted2)">Serviço</div>
+        </div>
+        <div style="height:2px;background:var(--border);flex:1;margin-top:15px"></div>
+        <div class="bkp-step" data-step="2" style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--border);color:var(--muted2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">2</div>
+          <div style="font-size:10px;color:var(--muted2)">Data</div>
+        </div>
+        <div style="height:2px;background:var(--border);flex:1;margin-top:15px"></div>
+        <div class="bkp-step" data-step="3" style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--border);color:var(--muted2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">3</div>
+          <div style="font-size:10px;color:var(--muted2)">Horário</div>
+        </div>
+        <div style="height:2px;background:var(--border);flex:1;margin-top:15px"></div>
+        <div class="bkp-step" data-step="4" style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--border);color:var(--muted2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">4</div>
+          <div style="font-size:10px;color:var(--muted2)">Dados</div>
+        </div>
+      </div>
+
+      <!-- Passo 1: Serviço -->
+      <div id="bkpP1" class="card">
+        <div class="clb">ESCOLHA O SERVIÇO</div>
+        <div id="bkpServList" style="margin-top:10px;display:grid;gap:8px"></div>
+      </div>
+
+      <!-- Passo 2: Data -->
+      <div id="bkpP2" class="card" style="display:none">
+        <div class="clb">ESCOLHA A DATA</div>
+        <div style="margin-top:10px">
+          <input type="date" id="bkpDataInput" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:12px;border-radius:8px;font-size:15px;outline:none;width:100%;font-family:var(--font-b)" oninput="bkpSelecionarData(this.value)">
+          <div id="bkpDataMsg" style="margin-top:8px;font-size:12px;color:var(--muted2)"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn btn-ghost" onclick="bkpGoStep(1)">← Voltar</button>
+          <button class="btn btn-primary" id="bkpBtnData" onclick="bkpGoStep(3)" disabled style="flex:1;justify-content:center">Próximo →</button>
+        </div>
+      </div>
+
+      <!-- Passo 3: Horário -->
+      <div id="bkpP3" class="card" style="display:none">
+        <div class="clb">ESCOLHA O HORÁRIO</div>
+        <div id="bkpHorarios" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px"></div>
+        <div id="bkpHorMsg" style="margin-top:8px;font-size:12px;color:var(--muted2)"></div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn btn-ghost" onclick="bkpGoStep(2)">← Voltar</button>
+        </div>
+      </div>
+
+      <!-- Passo 4: Dados do cliente -->
+      <div id="bkpP4" class="card" style="display:none">
+        <div class="clb">SEUS DADOS</div>
+        <!-- Resumo do agendamento -->
+        <div id="bkpResumo" style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px"></div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="fg"><label>Nome completo *</label><input type="text" id="bkpNome" placeholder="Seu nome" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%"></div>
+          <div class="fg"><label>WhatsApp / Telefone *</label><input type="tel" id="bkpTel" placeholder="(11) 99999-9999" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%"></div>
+          <div class="fg"><label>Veículo (opcional)</label><input type="text" id="bkpVei" placeholder="Modelo do veículo" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%"></div>
+          <div id="bkpErrMsg" style="display:none;background:rgba(255,82,82,.08);border:1px solid rgba(255,82,82,.25);border-radius:8px;padding:10px;font-size:12px;color:#ff5252"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="bkpGoStep(3)">← Voltar</button>
+            <button class="btn btn-success" onclick="bkpConfirmar()" style="flex:1;justify-content:center">✅ Confirmar Agendamento</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Passo 5: Confirmação -->
+      <div id="bkpP5" class="card" style="display:none;text-align:center">
+        <div style="font-size:48px;margin-bottom:12px">🎉</div>
+        <div style="font-family:var(--font-d);font-size:24px;letter-spacing:2px;color:var(--green);margin-bottom:8px">AGENDADO!</div>
+        <div id="bkpConfMsg" style="font-size:13px;color:var(--muted2);line-height:1.7;margin-bottom:16px"></div>
+        <div id="bkpConfResumo" style="background:var(--surface2);border-radius:10px;padding:14px;text-align:left;font-size:13px;margin-bottom:16px"></div>
+        <button class="btn btn-ghost" onclick="location.href=location.pathname" style="width:100%;justify-content:center">← Fazer novo agendamento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ SUPORTE / CHAMADOS ══════ -->
+  <div class="page" id="page-suporte">
+    <div class="ph">
+      <div class="ph-l"><div class="ph-t">SUPOR<span>TE</span></div><div class="ph-s">Abra chamados e acompanhe a resolução</div></div>
+      <div class="ph-r"><button class="btn btn-ghost btn-sm" onclick="loadMeusChamados()">↺ Atualizar</button></div>
+    </div>
+
+    <!-- Abrir novo chamado -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div class="card c-blue">
+        <div class="clb">NOVO CHAMADO</div>
+        <div class="fgrid" style="gap:12px;margin-top:4px">
+          <div class="fg"><label>Título *</label><input type="text" id="ch_titulo" class="" placeholder="Descreva o problema brevemente" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%"></div>
+          <div class="fg"><label>Prioridade</label>
+            <select id="ch_prior" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%">
+              <option value="baixa">🟢 Baixa — dúvida ou melhoria</option>
+              <option value="media" selected>🟡 Média — funcionalidade com problema</option>
+              <option value="alta">🔴 Alta — impacto no operacional</option>
+              <option value="critica">🚨 Crítica — sistema fora do ar</option>
+            </select>
+          </div>
+          <div class="fg"><label>Descrição detalhada *</label><textarea id="ch_desc" placeholder="Descreva o que está acontecendo com o máximo de detalhes..." style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%;min-height:90px;resize:vertical;font-family:var(--font-b)"></textarea></div>
+          <div class="fg"><label>Evidências <span style="font-size:10px;color:var(--muted2)">(links, prints, erros — texto livre)</span></label><textarea id="ch_evid" placeholder="Ex: https://... ou 'Erro aparece ao clicar em X'..." style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%;min-height:60px;resize:vertical;font-family:var(--font-b)"></textarea></div>
+          <div id="ch_errmsg" style="display:none;background:rgba(255,82,82,.08);border:1px solid rgba(255,82,82,.25);border-radius:8px;padding:10px;font-size:12px;color:#ff5252"></div>
+          <button class="btn btn-primary" onclick="abrirChamado()" style="justify-content:center"><i class="fas fa-paper-plane" style="margin-right:6px"></i>Abrir Chamado</button>
+        </div>
+      </div>
+
+      <!-- Info lateral -->
+      <div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="clb">STATUS DOS MEUS CHAMADOS</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">ABERTOS</div><div style="font-family:var(--font-d);font-size:26px;color:#ff5252" id="chCntAberto">-</div></div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">EM ANÁLISE</div><div style="font-family:var(--font-d);font-size:26px;color:var(--yellow)" id="chCntAnalise">-</div></div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">EM ANDAMENTO</div><div style="font-family:var(--font-d);font-size:26px;color:var(--accent)" id="chCntAndamento">-</div></div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--muted2);margin-bottom:4px">RESOLVIDOS</div><div style="font-family:var(--font-d);font-size:26px;color:var(--green)" id="chCntResolvido">-</div></div>
+          </div>
+        </div>
+        <div class="card" style="background:rgba(79,195,247,.05);border-color:rgba(79,195,247,.2)">
+          <div class="clb" style="color:var(--accent)">DICAS DE USO</div>
+          <div style="font-size:12px;color:var(--muted2);line-height:1.7;margin-top:6px">
+            ✅ Descreva o erro com o máximo de detalhes<br>
+            📷 Inclua prints ou links nas evidências<br>
+            🔴 Use prioridade <b>Crítica</b> apenas para sistema fora do ar<br>
+            ⏰ Tempo médio de resposta: até 24h úteis<br>
+            📩 Você será notificado quando o status mudar
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lista dos meus chamados -->
+    <div class="tw">
+      <div class="twh"><span class="twt">MEUS CHAMADOS</span><span class="badge bg-blue" id="chCount">0</span></div>
+      <table><thead><tr><th>Data</th><th>Título</th><th>Prioridade</th><th>Status</th><th>Resposta do Suporte</th><th>Ações</th></tr></thead>
+      <tbody id="chBody"></tbody></table>
+    </div>
+  </div>
 
   <!-- DASHBOARD -->
   <div class="page active" id="page-dashboard">
@@ -1289,6 +1457,7 @@ body.light .badge{opacity:.9}
       <button class="ptab" onclick="showAdminTab('integracoes',this)">🔌 Integrações</button>
       <button class="ptab" onclick="showAdminTab('auditoria',this)">🔍 Auditoria</button>
       <button class="ptab" onclick="showAdminTab('manual',this)">📖 Manual</button>
+      <button class="ptab" onclick="showAdminTab('booking',this)">🔗 Agend. Online</button>
     </div>
 
     <!-- TAB: ACESSO -->
@@ -1320,6 +1489,54 @@ body.light .badge{opacity:.9}
         <div style="padding:12px 18px;font-size:11px;color:var(--muted2);border-top:1px solid var(--border)">
           💡 Funcionários cadastrados aqui recebem acesso automático ao sistema. O limite de funcionários é definido pelo seu plano de assinatura.
         </div>
+      </div>
+    </div>
+
+    <!-- TAB: AGENDAMENTO ONLINE -->
+    <div id="adminTab-booking" style="display:none">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="admin-card">
+          <div class="admin-card-title">🔗 LINK DE AGENDAMENTO</div>
+          <div class="crow">
+            <div><div style="font-size:13px;font-weight:600">Agendamento Online Ativo</div><div style="font-size:11px;color:var(--muted2)">Permite que clientes agendem pelo link público</div></div>
+            <button class="toggle" id="bk_ativo" onclick="this.classList.toggle('on')"></button>
+          </div>
+          <div style="margin:14px 0">
+            <div style="font-size:10px;letter-spacing:1px;color:var(--muted2);margin-bottom:6px">SEU LINK PÚBLICO</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="bk_link_url" readonly style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);padding:9px 12px;border-radius:8px;font-size:11px;font-family:var(--font-m);flex:1;outline:none" placeholder="Gerar link...">
+              <button class="btn btn-ghost btn-sm" onclick="copiarLinkBooking()" title="Copiar link">📋</button>
+            </div>
+            <button class="btn btn-outline btn-sm" style="margin-top:8px;width:100%;justify-content:center" onclick="gerarLinkBooking()">🔗 Gerar / Atualizar Link</button>
+          </div>
+          <div class="fg" style="margin-bottom:12px">
+            <label>Duração padrão dos serviços</label>
+            <select id="bk_duracao" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%">
+              <option value="30">30 minutos</option>
+              <option value="45">45 minutos</option>
+              <option value="60" selected>60 minutos (1 hora)</option>
+              <option value="90">90 minutos (1h30)</option>
+              <option value="120">120 minutos (2 horas)</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Mensagem de confirmação para o cliente</label>
+            <textarea id="bk_msg_conf" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 13px;border-radius:8px;font-size:13px;outline:none;width:100%;min-height:70px;resize:vertical;font-family:var(--font-b)" placeholder="Ex: Seu agendamento foi recebido! Em breve confirmaremos. Dúvidas? Fale conosco."></textarea>
+          </div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card-title">⏰ HORÁRIOS DE FUNCIONAMENTO</div>
+          <div id="bk_dias_grid" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+      </div>
+      <div class="admin-card" style="margin-top:16px">
+        <div class="admin-card-title">✅ SERVIÇOS DISPONÍVEIS PARA AGENDAMENTO ONLINE</div>
+        <div style="font-size:12px;color:var(--muted2);margin-bottom:12px">Selecione quais serviços o cliente pode agendar pelo link público.</div>
+        <div id="bk_servicos_grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:14px"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button class="btn btn-primary" onclick="salvarConfigBooking()">✓ Salvar Configurações</button>
+        <button class="btn btn-ghost" onclick="showAdminTab('booking',document.querySelector('#adminTabs .ptab:last-child'))">↺ Recarregar</button>
       </div>
     </div>
 
@@ -3055,7 +3272,7 @@ function fecharM(id) { document.getElementById(id).classList.remove('open'); }
 function v(id) { const e=document.getElementById(id); return e?e.value:''; }
 function mCPF(el){let x=el.value.replace(/\D/g,'').slice(0,11);x=x.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3}\.\d{3})(\d)/,'$1.$2').replace(/(\d{3}\.\d{3}\.\d{3})(\d)/,'$1-$2');el.value=x}
 function mTel(el){let x=el.value.replace(/\D/g,'').slice(0,11);x=x.length>10?x.replace(/(\d{2})(\d{5})(\d{4})/,'($1) $2-$3'):x.replace(/(\d{2})(\d{4})(\d{0,4})/,'($1) $2-$3');el.value=x}
-function sBadge(s){return`<span class="badge ${{Pendente:'bg-yellow',Agendado:'bg-blue',Concluído:'bg-green',Cancelado:'bg-red'}[s]||'bg-blue'}">${s||'Agendado'}</span>`}
+function sBadge(s){return`<span class="badge ${{Pendente:'bg-yellow',Agendado:'bg-blue',Concluído:'bg-green',Cancelado:'bg-red',aguardando_confirmacao:'bg-yellow'}[s]||'bg-blue'}">${s||'Agendado'}</span>`}
 function updateDate(){document.getElementById('topDate').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'short'}).toUpperCase()+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
 async function populateSvSel(id){const sv=await dbGet('servicos');document.getElementById(id).innerHTML='<option value="">Selecione...</option>'+(sv||[]).map(s=>`<option value="${s.id}" data-preco="${s.preco}">${s.nome} — ${fmt(s.preco)}</option>`).join('')}
 
@@ -3071,6 +3288,7 @@ function goTo(page) {
     caixa:renderCaixa, admin:renderAdmin, fichatecnica:renderFichaTecnica,
     historico:()=>{}, // renderizado por abrirHistoricoCliente
     whatsapp:renderWA,
+    suporte:loadMeusChamados,
     agendamento:()=>{
       document.getElementById('ag_data').value=today();
       if(!agServicos.length||agServicos.every(s=>s.removido)){
@@ -3321,13 +3539,45 @@ var WA_TEMPLATES_PADRAO = [
    msg:'🚨 *OFERTA ESPECIAL — {empresa}* 🚨\n\nOlá, {nome}!\n\nTemos uma promoção imperdível esperando por você! 🔥\n\n✅ {servico}\n\nVálido por tempo limitado — garanta já o seu horário!\n\n👉 Responda essa mensagem para agendar.'}
 ];
 
+// Templates completos: cotidiano + marketing + promoções
+var WA_TEMPLATES_EXTRAS = [
+  // ── COTIDIANO ──
+  {id:'tpl_reagend', nome:'Reagendamento Necessário', categoria:'Lembrete',
+   msg:'Olá, {nome}! 😊\n\nPrecisamos reagendar o seu serviço na *{empresa}*. O horário agendado para *{data}* às *{hora}* precisou ser cancelado por imprevisto.\n\nPor favor, nos diga sua disponibilidade para remarcarmos o mais breve possível!\n\nPedimos desculpas pelo transtorno. 🙏'},
+  {id:'tpl_feedback', nome:'Pós-Atendimento — Feedback', categoria:'Conclusão',
+   msg:'Oi, {nome}! Tudo bem? 🌟\n\nÉ um prazer ter você como cliente da *{empresa}*!\n\nGostaríamos de saber: como foi sua experiência no último atendimento?\n\n⭐ Sua avaliação é muito importante para continuarmos melhorando!\n\n👉 Responda essa mensagem com um número de 1 a 10.\n\nObrigado! 💙'},
+  {id:'tpl_pronto', nome:'Produto/Serviço Pronto — Retire Já', categoria:'Confirmação',
+   msg:'Oi, {nome}! 🎉\n\nBoa notícia! O seu serviço na *{empresa}* está *PRONTO*!\n\n✅ *{servico}*\n\nPode vir retirar quando quiser. Aguardamos você! 😊\n\nHorário de funcionamento: segunda a sábado.'},
+  {id:'tpl_cobr', nome:'Cobrança Gentil', categoria:'Personalizada',
+   msg:'Olá, {nome}! Tudo bem?\n\nPassando aqui para lembrar que identificamos um pagamento pendente referente ao serviço realizado na *{empresa}*.\n\n💰 *{servico}* — {valor}\n\nSe já regularizou, desconsidere esta mensagem. Caso precise de mais prazo, é só nos avisar!\n\nObrigado pela compreensão. 🙏'},
+  // ── MARKETING ──
+  {id:'tpl_novo_srv', nome:'Lançamento de Serviço Novo', categoria:'Promoção',
+   msg:'🆕 *NOVIDADE NA {empresa}* 🆕\n\nOlá, {nome}!\n\nTemos uma novidade incrível para você! Acabamos de lançar um novo serviço:\n\n✨ *{servico}*\n\nQualidade garantida e preço especial para os primeiros clientes!\n\n👉 Garante logo o seu horário respondendo essa mensagem.\n\nTe esperamos! 🚗'},
+  {id:'tpl_promo_mes', nome:'Promoção do Mês', categoria:'Promoção',
+   msg:'🔥 *PROMOÇÃO DO MÊS — {empresa}* 🔥\n\nOlá, {nome}!\n\nEste mês temos uma promoção especial preparada para você!\n\n🎁 Condições exclusivas em nossos principais serviços!\n\nVálido apenas este mês — não perca!\n\n👉 Responda essa mensagem e garanta já o seu horário! ⚡'},
+  {id:'tpl_reativ', nome:'Reativação — Cliente Inativo', categoria:'Inativo',
+   msg:'Olá, {nome}! Saudades de você por aqui! 🥺\n\nFaz um tempo que não nos vemos na *{empresa}*... Como você está?\n\nQueremos te dar um motivo especial para voltar! 🎁\n\n🔹 *Desconto exclusivo* esperando por você!\n🔹 Atendimento de qualidade como sempre!\n\n👉 Agende sua visita — é só responder essa mensagem! Vamos adorar ter você de volta! 😊'},
+  {id:'tpl_fidel_pts', nome:'Pontos de Fidelidade — Resgate', categoria:'Fidelidade',
+   msg:'🌟 *SEU EXTRATO DE FIDELIDADE — {empresa}* 🌟\n\nOlá, {nome}!\n\nVocê tem *{pontos} pontos* acumulados no nosso programa de fidelidade! 🎉\n\n💡 Você pode resgatar seus pontos por descontos e benefícios exclusivos na próxima visita!\n\n🎁 Benefício disponível: *{beneficio}*\n\n👉 Apresente essa mensagem na sua próxima visita e aproveite!\n\nObrigado por ser nosso cliente! 💙'},
+  // ── PROMOÇÕES ──
+  {id:'tpl_desc_sem', nome:'Desconto Especial — Esta Semana', categoria:'Promoção',
+   msg:'⚡ *OFERTA RELÂMPAGO — {empresa}* ⚡\n\nOlá, {nome}!\n\nSomente *esta semana*, você tem desconto especial em nossos serviços! 🔥\n\n✅ Atendimento prioritário\n✅ Preço exclusivo\n✅ Qualidade garantida\n\n⏰ Esta oferta expira em breve!\n\n👉 Garanta seu horário agora mesmo respondendo essa mensagem! Vagas limitadas!'},
+  {id:'tpl_combo', nome:'Combo de Serviços com Desconto', categoria:'Promoção',
+   msg:'💥 *COMBO ESPECIAL — {empresa}* 💥\n\nOlá, {nome}!\n\nTemos um combo incrível para você aproveitar mais por menos! 💰\n\n🔥 *COMBO DO MÊS:*\n✅ Serviço 1\n✅ Serviço 2\n✅ Serviço 3\n\n🏷️ Tudo isso com preço especial de pacote!\n\n👉 Agende seu combo respondendo essa mensagem. Disponibilidade limitada! ⚡'},
+  {id:'tpl_data_esp', nome:'Data Especial — Dia das Mães/Natal etc.', categoria:'Promoção',
+   msg:'🌸 *PRESENTE ESPECIAL — {empresa}* 🌸\n\nOlá, {nome}!\n\nNessa data tão especial, queremos presentear você com condições únicas! 🎁\n\n💆 Cuide-se e presenteie quem você ama com nossos serviços!\n\n✨ Vouchers presentes disponíveis — perfeito para presentear!\n\n👉 Entre em contato para mais informações! Feliz data especial! 💙'},
+  {id:'tpl_blackfri', nome:'Black Friday — Super Desconto', categoria:'Promoção',
+   msg:'🖤 *BLACK FRIDAY — {empresa}* 🖤\n\nOlá, {nome}!\n\n*Os maiores descontos do ano chegaram!* 🔥\n\n🚀 Aproveite preços incríveis em todos os nossos serviços!\n\n⏰ Oferta válida apenas hoje — não perca!\n\n🎯 Clique abaixo e garanta já o seu horário com desconto! Vagas super limitadas!\n\n👉 Responda AGORA para garantir o seu! ⚡'}
+];
+
 // Seeder automático de templates
 async function seedTemplatesWA() {
   var tpls = await dbGet('waTemplates') || [];
   if (!Array.isArray(tpls)) tpls = Object.values(tpls);
   if (tpls.length > 0) return; // já tem templates, não sobrescreve
-  await dbSet('waTemplates', WA_TEMPLATES_PADRAO);
-  _waTpls = WA_TEMPLATES_PADRAO.slice();
+  var todos = WA_TEMPLATES_PADRAO.concat(WA_TEMPLATES_EXTRAS);
+  await dbSet('waTemplates', todos);
+  _waTpls = todos.slice();
 }
 
 // Navegar entre abas WA
@@ -3797,6 +4047,440 @@ async function reenviarWA(tel, tplNomeEnc) {
 function escHtml(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* FIM WHATSAPP */
+
+/* ════════════════════════════════════════════
+   AGENDAMENTO ONLINE — Configuração (admin)
+════════════════════════════════════════════ */
+
+var BK_DIAS = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+
+async function carregarConfigBooking() {
+  var cfg = await dbGet('bookingConfig') || {};
+  var ativo = document.getElementById('bk_ativo');
+  if (ativo) { ativo.className = 'toggle' + (cfg.ativo ? ' on' : ''); }
+  var dur = document.getElementById('bk_duracao');
+  if (dur && cfg.duracao) dur.value = cfg.duracao;
+  var msg = document.getElementById('bk_msg_conf');
+  if (msg) msg.value = cfg.msgConf || '';
+  // Horários por dia
+  var grid = document.getElementById('bk_dias_grid');
+  if (grid) {
+    grid.innerHTML = BK_DIAS.map(function(d,i){
+      var dia = (cfg.dias||{})[i] || {};
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">'
+        + '<button class="toggle'+(dia.ativo?' on':'')+'" id="bk_dia_'+i+'_on" onclick="this.classList.toggle(\'on\')"></button>'
+        + '<span style="min-width:70px;font-size:13px">'+d+'</span>'
+        + '<input type="time" id="bk_dia_'+i+'_ini" value="'+(dia.ini||'08:00')+'" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;width:90px">'
+        + '<span style="font-size:11px;color:var(--muted2)">até</span>'
+        + '<input type="time" id="bk_dia_'+i+'_fim" value="'+(dia.fim||'18:00')+'" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;width:90px">'
+        + '</div>';
+    }).join('');
+  }
+  // Serviços
+  var svGrid = document.getElementById('bk_servicos_grid');
+  if (svGrid) {
+    var svs = await dbGet('servicos') || [];
+    var svSel = cfg.servicos || [];
+    svGrid.innerHTML = svs.map(function(sv){
+      var chk = svSel.includes(String(sv.id)) || svSel.includes(sv.id);
+      return '<label style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13px">'
+        + '<input type="checkbox" id="bkSv_'+sv.id+'" value="'+sv.id+'"'+(chk?' checked':'')+' style="accent-color:var(--accent)">'
+        + escHtml(sv.nome||'Serviço')
+        + (sv.preco ? ' <span style="margin-left:auto;font-family:var(--font-m);font-size:11px;color:var(--green)">R$ '+Number(sv.preco).toFixed(2)+'</span>' : '')
+        + '</label>';
+    }).join('') || '<div style="color:var(--muted2);font-size:12px">Nenhum serviço cadastrado ainda.</div>';
+  }
+  // Link
+  gerarLinkBooking();
+}
+
+async function salvarConfigBooking() {
+  var dias = {};
+  BK_DIAS.forEach(function(_,i){
+    var on  = document.getElementById('bk_dia_'+i+'_on');
+    var ini = document.getElementById('bk_dia_'+i+'_ini');
+    var fim = document.getElementById('bk_dia_'+i+'_fim');
+    if (on) dias[i] = { ativo: on.classList.contains('on'), ini: ini?ini.value:'08:00', fim: fim?fim.value:'18:00' };
+  });
+  var svsSel = [];
+  document.querySelectorAll('[id^="bkSv_"]:checked').forEach(function(el){ svsSel.push(el.value); });
+  var cfg = {
+    ativo:    document.getElementById('bk_ativo')    ? document.getElementById('bk_ativo').classList.contains('on') : false,
+    duracao:  document.getElementById('bk_duracao')  ? parseInt(document.getElementById('bk_duracao').value) : 60,
+    msgConf:  document.getElementById('bk_msg_conf') ? document.getElementById('bk_msg_conf').value.trim() : '',
+    dias:     dias,
+    servicos: svsSel
+  };
+  await dbSet('bookingConfig', cfg);
+  await auditLog('config','Configuração de agendamento online salva');
+  toast('Configurações de agendamento online salvas!','ok');
+  gerarLinkBooking();
+}
+
+function gerarLinkBooking() {
+  var tid = window._tenantId;
+  if (!tid) return;
+  var link = 'https://gbrsistemassa.github.io/gbr-sistemas/?book=' + tid;
+  var inp = document.getElementById('bk_link_url');
+  if (inp) inp.value = link;
+}
+
+function copiarLinkBooking() {
+  var inp = document.getElementById('bk_link_url');
+  if (!inp || !inp.value) { toast('Gere o link primeiro','err'); return; }
+  navigator.clipboard.writeText(inp.value).then(function(){ toast('Link copiado!','ok'); });
+}
+
+/* ════════════════════════════════════════════
+   AGENDAMENTO PÚBLICO — Booking sem login
+════════════════════════════════════════════ */
+
+var _bkpTid = null;
+var _bkpCfg = {};
+var _bkpSvSel = null;    // serviço selecionado
+var _bkpDataSel = null;  // data selecionada
+var _bkpHorSel = null;   // horário selecionado
+
+async function iniciarBookingPublico(tenantId) {
+  _bkpTid = tenantId;
+  document.getElementById('bookingPublico').style.display = 'block';
+  document.getElementById('loginScreen').style.display = 'none';
+  // Ocultar topbar e sidebar (contexto público)
+  var tb = document.getElementById('topbar');
+  var sb = document.getElementById('sidebar');
+  var mn = document.getElementById('main');
+  if (tb) tb.style.display = 'none';
+  if (sb) sb.style.display = 'none';
+  if (mn) mn.style.display = 'none';
+
+  // Carregar empresa e config
+  try {
+    var snapEmp = await window._fbGet(window._fbRef(window._db, 'tenants/'+tenantId+'/empresa'));
+    var emp = snapEmp.val() || {};
+    var empNome = emp.nome || emp.razaoSocial || 'GBR Sistemas';
+    document.getElementById('bkpEmpNome').textContent = empNome.toUpperCase();
+    document.title = empNome + ' — Agendar Online';
+  } catch(e) {}
+
+  try {
+    var snapCfg = await window._fbGet(window._fbRef(window._db, 'tenants/'+tenantId+'/bookingConfig'));
+    _bkpCfg = snapCfg.val() || {};
+  } catch(e) { _bkpCfg = {}; }
+
+  if (!_bkpCfg.ativo) {
+    document.getElementById('bkpP1').innerHTML = '<div style="text-align:center;padding:30px"><div style="font-size:36px;margin-bottom:12px">⏸️</div><div style="font-size:15px;font-weight:600;margin-bottom:8px">Agendamento online indisponível</div><div style="font-size:13px;color:var(--muted2)">O agendamento online está temporariamente desativado.<br>Entre em contato com a empresa para agendar.</div></div>';
+    return;
+  }
+
+  bkpRenderServicos();
+}
+
+async function bkpRenderServicos() {
+  var el = document.getElementById('bkpServList');
+  if (!el) return;
+  var svIds = _bkpCfg.servicos || [];
+  if (!svIds.length) { el.innerHTML = '<div style="color:var(--muted2);font-size:13px;padding:10px">Nenhum serviço disponível no momento.</div>'; return; }
+  try {
+    var snap = await window._fbGet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/servicos'));
+    var todos = snap.val() || [];
+    if (!Array.isArray(todos)) todos = Object.values(todos);
+    var disp = todos.filter(function(s){ return svIds.includes(String(s.id)) || svIds.includes(s.id); });
+    el.innerHTML = disp.map(function(sv){
+      return '<div onclick="bkpSelecionarSv(this,\''+sv.id+'\','+JSON.stringify(sv.nome||'Serviço').replace(/</g,'').replace(/>/g,'')+')" '
+        + 'style="padding:14px 16px;border:1px solid var(--border);border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:all .15s" '
+        + 'onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="if(!this.classList.contains(\'sel\'))this.style.borderColor=\'var(--border)\'">'
+        + '<div><div style="font-weight:600;font-size:14px">'+escHtml(sv.nome||'Serviço')+'</div>'
+        + (sv.tempo ? '<div style="font-size:11px;color:var(--muted2);margin-top:2px">⏱ '+sv.tempo+'</div>' : '')
+        + '</div>'
+        + (sv.preco ? '<span style="font-family:var(--font-d);font-size:20px;color:var(--green)">R$ '+Number(sv.preco).toFixed(2)+'</span>' : '')
+        + '</div>';
+    }).join('');
+  } catch(e) { el.innerHTML = '<div style="color:var(--red);font-size:12px">Erro ao carregar serviços.</div>'; }
+}
+
+function bkpSelecionarSv(el, svId, svNome) {
+  document.querySelectorAll('#bkpServList div[onclick]').forEach(function(d){ d.classList.remove('sel'); d.style.borderColor='var(--border)'; d.style.background=''; });
+  el.classList.add('sel'); el.style.borderColor='var(--accent)'; el.style.background='rgba(79,195,247,.06)';
+  _bkpSvSel = {id: svId, nome: svNome};
+  setTimeout(function(){ bkpGoStep(2); }, 300);
+}
+
+function bkpSelecionarData(val) {
+  _bkpDataSel = val;
+  var btn = document.getElementById('bkpBtnData');
+  var msg = document.getElementById('bkpDataMsg');
+  if (!val) { if(btn) btn.disabled=true; return; }
+  // Verificar se dia da semana está configurado
+  var dow = new Date(val+'T12:00:00').getDay();
+  var diaConf = (_bkpCfg.dias||{})[dow] || {};
+  if (!diaConf.ativo) {
+    if (msg) msg.textContent = '❌ A empresa não atende neste dia da semana. Escolha outra data.';
+    if (btn) btn.disabled = true;
+  } else {
+    if (msg) msg.textContent = '✅ Dia disponível! Clique em Próximo para ver os horários.';
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function bkpRenderHorarios() {
+  var el = document.getElementById('bkpHorarios');
+  var msg = document.getElementById('bkpHorMsg');
+  if (!el || !_bkpDataSel) return;
+  el.innerHTML = '<div style="color:var(--muted2);font-size:12px;padding:8px">Carregando horários...</div>';
+  var dow = new Date(_bkpDataSel+'T12:00:00').getDay();
+  var diaConf = (_bkpCfg.dias||{})[dow] || {ini:'08:00', fim:'18:00'};
+  var dur = parseInt(_bkpCfg.duracao) || 60;
+  // Gerar slots
+  var slots = [];
+  var ini = diaConf.ini || '08:00';
+  var fim = diaConf.fim || '18:00';
+  var cur = ini;
+  var safety = 0;
+  while (cur < fim && safety++ < 50) {
+    slots.push(cur);
+    var parts = cur.split(':');
+    var mins = parseInt(parts[0])*60 + parseInt(parts[1]) + dur;
+    cur = ('0'+Math.floor(mins/60)).slice(-2)+':'+('0'+(mins%60)).slice(-2);
+  }
+  // Buscar agendamentos do dia para bloquear horários
+  var ocupados = [];
+  try {
+    var snap = await window._fbGet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/agendamentos'));
+    var ags = snap.val() || [];
+    if (!Array.isArray(ags)) ags = Object.values(ags);
+    ocupados = ags.filter(function(a){ return a.data===_bkpDataSel && a.status!=='Cancelado'; }).map(function(a){ return a.hora||''; });
+  } catch(e) {}
+  if (!slots.length) { el.innerHTML='<div style="color:var(--muted2);font-size:12px">Nenhum horário disponível.</div>'; return; }
+  el.innerHTML = slots.map(function(s){
+    var ocp = ocupados.includes(s);
+    return '<div onclick="'+(ocp?'':'bkpSelecionarHor(this,\''+s+'\')')+'" '
+      + 'style="padding:12px;border-radius:8px;text-align:center;font-family:var(--font-m);font-size:14px;font-weight:600;cursor:'+(ocp?'not-allowed':'pointer')+';'
+      + (ocp ? 'background:rgba(255,82,82,.1);border:1px solid rgba(255,82,82,.3);color:var(--muted2);text-decoration:line-through;' : 'background:var(--surface2);border:1px solid var(--border);transition:all .15s;')
+      + 'onmouseover="'+(ocp?'':'this.style.borderColor=\'var(--accent)\';this.style.background=\'rgba(79,195,247,.08)\'')+'" '
+      + 'onmouseout="'+(ocp?'':'if(!this.classList.contains(\'sel\'))this.style.borderColor=\'var(--border)\';this.style.background=\'var(--surface2)\'')+'">'
+      + s + (ocp?'<br><span style="font-size:9px">Ocupado</span>':'')
+      + '</div>';
+  }).join('');
+}
+
+function bkpSelecionarHor(el, hora) {
+  document.querySelectorAll('#bkpHorarios div[onclick]').forEach(function(d){ d.classList.remove('sel'); d.style.borderColor='var(--border)'; d.style.background='var(--surface2)'; });
+  el.classList.add('sel'); el.style.borderColor='var(--accent)'; el.style.background='rgba(79,195,247,.08)';
+  _bkpHorSel = hora;
+  setTimeout(function(){ bkpGoStep(4); }, 300);
+}
+
+function bkpGoStep(n) {
+  for (var i=1;i<=5;i++) {
+    var el = document.getElementById('bkpP'+i);
+    if (el) el.style.display = i===n ? '' : 'none';
+  }
+  // Atualizar indicadores de progresso
+  document.querySelectorAll('.bkp-step').forEach(function(s){
+    var sn = parseInt(s.getAttribute('data-step'));
+    var circle = s.querySelector('div');
+    if (!circle) return;
+    if (sn < n) { circle.style.background='var(--green)'; circle.style.color='#000'; circle.textContent='✓'; }
+    else if (sn === n) { circle.style.background='var(--accent)'; circle.style.color='#000'; circle.textContent=String(sn); }
+    else { circle.style.background='var(--border)'; circle.style.color='var(--muted2)'; circle.textContent=String(sn); }
+  });
+  if (n === 3) bkpRenderHorarios();
+  if (n === 4) bkpMostrarResumo();
+}
+
+function bkpMostrarResumo() {
+  var el = document.getElementById('bkpResumo');
+  if (!el) return;
+  var d = _bkpDataSel ? new Date(_bkpDataSel+'T12:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'}) : '—';
+  el.innerHTML = '<div style="font-size:10px;letter-spacing:1px;color:var(--accent);margin-bottom:8px">RESUMO DO AGENDAMENTO</div>'
+    + '<div>✨ <b>Serviço:</b> '+escHtml((_bkpSvSel&&_bkpSvSel.nome)||'—')+'</div>'
+    + '<div>📅 <b>Data:</b> '+d+'</div>'
+    + '<div>⏰ <b>Horário:</b> '+(_bkpHorSel||'—')+'</div>';
+}
+
+async function bkpConfirmar() {
+  var nome = (document.getElementById('bkpNome').value||'').trim();
+  var tel  = (document.getElementById('bkpTel').value||'').trim();
+  var vei  = (document.getElementById('bkpVei').value||'').trim();
+  var errEl = document.getElementById('bkpErrMsg');
+  errEl.style.display = 'none';
+  if (!nome) { errEl.textContent='❌ Informe seu nome completo.'; errEl.style.display='block'; return; }
+  if (!tel)  { errEl.textContent='❌ Informe seu telefone/WhatsApp.'; errEl.style.display='block'; return; }
+  if (!_bkpSvSel || !_bkpDataSel || !_bkpHorSel) { errEl.textContent='❌ Selecione serviço, data e horário.'; errEl.style.display='block'; return; }
+
+  var agend = {
+    id: Date.now(),
+    nome: nome,
+    clienteNome: nome,
+    telefone: tel,
+    veiculo: vei,
+    servicos: [{nome: _bkpSvSel.nome, preco: 0}],
+    data: _bkpDataSel,
+    hora: _bkpHorSel,
+    status: 'aguardando_confirmacao',
+    origem: 'link_publico',
+    criadoEm: new Date().toISOString(),
+    valorFinal: 0
+  };
+
+  try {
+    var snap = await window._fbGet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/agendamentos'));
+    var existing = snap.val() || [];
+    if (!Array.isArray(existing)) existing = Object.values(existing);
+    existing.push(agend);
+    await window._fbSet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/agendamentos'), existing);
+
+    // Mostrar confirmação
+    var d = new Date(_bkpDataSel+'T12:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
+    var msgConf = _bkpCfg.msgConf || 'Seu agendamento foi recebido! Em breve entraremos em contato para confirmar.';
+    document.getElementById('bkpConfMsg').textContent = msgConf;
+    document.getElementById('bkpConfResumo').innerHTML =
+      '✨ <b>Serviço:</b> '+escHtml(_bkpSvSel.nome)+'<br>'
+      + '📅 <b>Data:</b> '+d+'<br>'
+      + '⏰ <b>Horário:</b> '+_bkpHorSel+'<br>'
+      + '👤 <b>Nome:</b> '+escHtml(nome)+'<br>'
+      + '📱 <b>WhatsApp:</b> '+escHtml(tel);
+    bkpGoStep(5);
+  } catch(e) {
+    errEl.textContent = '❌ Erro ao confirmar: '+e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+/* ════════════════════════════════════════════
+   SUPORTE / CHAMADOS
+════════════════════════════════════════════ */
+
+var CH_STATUS_LABEL_CLI = {
+  aberto: '🔴 Aberto',
+  em_analise: '🟡 Em Análise',
+  em_andamento: '🔵 Em Andamento',
+  resolvido: '🟢 Resolvido',
+  fechado: '⬛ Fechado'
+};
+var CH_PRIOR_LABEL_CLI = {baixa:'🟢 Baixa', media:'🟡 Média', alta:'🔴 Alta', critica:'🚨 Crítica'};
+var CH_PRIOR_COR_CLI  = {baixa:'var(--green)', media:'var(--yellow)', alta:'var(--red)', critica:'var(--red)'};
+
+async function abrirChamado() {
+  var titulo = (document.getElementById('ch_titulo').value||'').trim();
+  var desc   = (document.getElementById('ch_desc').value||'').trim();
+  var prior  = document.getElementById('ch_prior').value;
+  var evid   = (document.getElementById('ch_evid').value||'').trim();
+  var errEl  = document.getElementById('ch_errmsg');
+  errEl.style.display = 'none';
+  if (!titulo) { errEl.textContent='❌ Informe o título do chamado.'; errEl.style.display='block'; return; }
+  if (!desc)   { errEl.textContent='❌ Descreva o problema detalhadamente.'; errEl.style.display='block'; return; }
+
+  var tid = window._tenantId;
+  var user = window._currentAuthUser;
+  if (!tid || !user) { errEl.textContent='❌ Sessão inválida. Faça login novamente.'; errEl.style.display='block'; return; }
+
+  // Buscar nome da empresa do tenant
+  var empresaNome = '';
+  try {
+    var snapEmp = await window._fbGet(window._fbRef(window._db, 'tenants/'+tid+'/empresa'));
+    var emp = snapEmp.val()||{};
+    empresaNome = emp.nome || emp.razaoSocial || tid;
+  } catch(e) { empresaNome = tid; }
+
+  var ticketId = 'tk_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  var ticket = {
+    tenantId: tid,
+    tenantNome: empresaNome,
+    titulo: titulo,
+    descricao: desc,
+    evidencias: evid,
+    prioridade: prior,
+    status: 'aberto',
+    criadoEm: new Date().toISOString(),
+    criadoPor: user.email,
+    atualizadoEm: new Date().toISOString()
+  };
+
+  try {
+    await window._fbSet(window._fbRef(window._db, 'support_tickets/'+ticketId), ticket);
+    document.getElementById('ch_titulo').value = '';
+    document.getElementById('ch_desc').value = '';
+    document.getElementById('ch_evid').value = '';
+    document.getElementById('ch_prior').value = 'media';
+    toast('✅ Chamado aberto com sucesso! Nossa equipe entrará em contato.','ok');
+    await auditLog('suporte','Chamado aberto: '+titulo);
+    loadMeusChamados();
+  } catch(e) {
+    errEl.textContent = '❌ Erro ao abrir chamado: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function loadMeusChamados() {
+  var tid = window._tenantId;
+  if (!tid) return;
+  var body  = document.getElementById('chBody');
+  var count = document.getElementById('chCount');
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--muted2);font-size:13px">Carregando...</td></tr>';
+  try {
+    var snap = await window._fbGet(window._fbRef(window._db, 'support_tickets'));
+    var all  = snap.val() || {};
+    var meus = Object.entries(all)
+      .filter(function(kv){ return kv[1].tenantId === tid; })
+      .map(function(kv){ return Object.assign({}, kv[1], {_id: kv[0]}); })
+      .sort(function(a,b){ return (b.criadoEm||'').localeCompare(a.criadoEm||''); });
+
+    // Contadores
+    var cnt = {aberto:0, em_analise:0, em_andamento:0, resolvido:0};
+    meus.forEach(function(t){
+      if (cnt[t.status] !== undefined) cnt[t.status]++;
+    });
+    var s = function(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; };
+    s('chCntAberto',cnt.aberto); s('chCntAnalise',cnt.em_analise);
+    s('chCntAndamento',cnt.em_andamento); s('chCntResolvido',cnt.resolvido);
+
+    // Badge sidebar
+    var urgentes = cnt.aberto + cnt.em_analise;
+    var badge = document.getElementById('navSupBadge');
+    if (badge) { badge.textContent = urgentes; badge.style.display = urgentes > 0 ? '' : 'none'; }
+    if (count) count.textContent = meus.length;
+
+    if (!meus.length) {
+      body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted2);font-size:13px">Nenhum chamado aberto ainda. Use o formulário ao lado para abrir seu primeiro chamado.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = meus.map(function(t){
+      var dt = t.criadoEm ? new Date(t.criadoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+      var statusLabel = CH_STATUS_LABEL_CLI[t.status] || t.status;
+      var priorLabel  = CH_PRIOR_LABEL_CLI[t.prioridade]  || t.prioridade;
+      var priorCor    = CH_PRIOR_COR_CLI[t.prioridade]    || 'var(--muted2)';
+      var rowBg = t.status === 'fechado' ? 'opacity:.6' : t.status === 'aberto' ? 'background:rgba(255,82,82,.025)' : '';
+      var resposta = t.resolucao
+        ? '<div style="font-size:11px;background:rgba(105,240,174,.07);border:1px solid rgba(105,240,174,.2);border-radius:6px;padding:6px 10px;color:var(--green)">'+escHtml(t.resolucao)+'</div>'
+        : '<span style="color:var(--muted2);font-size:11px">Aguardando resposta...</span>';
+      return '<tr style="'+rowBg+'">'
+        + '<td class="tm">'+dt+'</td>'
+        + '<td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">'+escHtml(t.titulo)+'</td>'
+        + '<td><span style="font-size:11px;font-weight:700;color:'+priorCor+'">'+priorLabel+'</span></td>'
+        + '<td><span style="font-size:12px">'+statusLabel+'</span></td>'
+        + '<td>'+resposta+'</td>'
+        + '<td>'+(t.status !== 'fechado' && t.status !== 'resolvido'
+            ? '<button class="btn btn-ghost btn-sm" onclick="cancelarChamado(\''+t._id+'\')" title="Cancelar chamado">✕ Cancelar</button>'
+            : '<span style="font-size:11px;color:var(--muted2)">Encerrado</span>')
+        + '</td></tr>';
+    }).join('');
+  } catch(e) {
+    body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--red);font-size:13px">Erro ao carregar chamados: '+e.message+'</td></tr>';
+  }
+}
+
+async function cancelarChamado(ticketId) {
+  if (!confirm('Cancelar este chamado? Isso irá marcá-lo como fechado.')) return;
+  try {
+    await window._fbSet(window._fbRef(window._db, 'support_tickets/'+ticketId+'/status'), 'fechado');
+    await window._fbSet(window._fbRef(window._db, 'support_tickets/'+ticketId+'/atualizadoEm'), new Date().toISOString());
+    toast('Chamado cancelado.','info');
+    loadMeusChamados();
+  } catch(e) { toast('Erro: '+e.message,'err'); }
+}
 
 async function renderDash(){
   const [cl,ag,fin,sv]=[await dbGet('clientes'),await dbGet('agendamentos'),await dbGet('financeiro'),await dbGet('servicos')];
@@ -5328,6 +6012,7 @@ function showAdminTab(tab, el){
   if(tab==='empresa')carregarEmpresa();
   if(tab==='menu')renderMenuAdmin();
   if(tab==='acesso')renderAcesso();
+  if(tab==='booking')carregarConfigBooking();
   if(tab==='integracoes')carregarIntegracoes();
   if(tab==='deploy')carregarDeploy();
 }
@@ -5705,6 +6390,13 @@ async function abrirModalNovoUser(){
   document.getElementById('nu_limite').textContent=`${atualCount} / ${maxFunc} funcionários`;
   document.getElementById('nu_result').style.display='none';
   document.getElementById('nu_errmsg').style.display='none';
+  // Se gerente (adm2), ocultar opções de dono/adm
+  var roleSelect = document.getElementById('nu_role');
+  var isGerente = (window._userRole === 'adm2');
+  Array.from(roleSelect.options).forEach(function(opt){
+    var adminOnly = ['adm1','dono','admin','gerente','adm2'];
+    opt.style.display = (isGerente && adminOnly.includes(opt.value)) ? 'none' : '';
+  });
   document.getElementById('mNovoUser').classList.add('open');
 }
 async function salvarNovoUser(){
@@ -6605,13 +7297,13 @@ const PERMISSIONS = {
     descricao: 'Acesso total ao sistema incluindo configuracoes'
   },
   adm2: {
-    label: 'ADM Gestao',
+    label: 'Gerente',
     color: '#4fc3f7',
     pages: ['dashboard','cadastro','banco','historico','agendamento','agenda','agenda-semana',
             'checklist','servicos','caixa','financeiro','relatorios','estoque','fichatecnica',
-            'fidelidade','whatsapp','manual'],
+            'fidelidade','whatsapp','admin','manual'],
     acoes: ['all_except_config'],
-    descricao: 'Gestao completa exceto configuracoes do sistema'
+    descricao: 'Gestao completa — pode cadastrar operadores, sem acesso a configuracoes do sistema'
   },
   operador: {
     label: 'Operador',
@@ -6654,8 +7346,10 @@ async function carregarRoleUsuario() {
       var loginRole = window._userRole || 'admin';
       if (loginRole === 'operador') {
         window._userRole = 'operador';
+      } else if (loginRole === 'gerente') {
+        window._userRole = 'adm2'; // gerente = gestão completa exceto configurações
       } else {
-        window._userRole = 'adm1'; // admin/dono = acesso total
+        window._userRole = 'adm1'; // dono/admin = acesso total
       }
     } else {
       window._userRole = userRole.tipo; // 'adm1', 'adm2', 'operador'
