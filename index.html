@@ -67,9 +67,12 @@ function toast(msg, type='ok') {
   // Guard: evita re-inicialização completa quando Firebase renova token
   var _lastAuthUid = null;
   var _licencaListenerRef = null;
+  var _logoutTimer = null; // debounce: aguarda antes de mostrar login (evita flicker por rede)
 
   _fbAuth.onAuthStateChanged(async function(user){
     if(user){
+      // Cancelar qualquer timer de logout pendente (usuário reconectou)
+      if (_logoutTimer) { clearTimeout(_logoutTimer); _logoutTimer = null; }
       // Se já inicializou para este mesmo UID, não re-executa o fluxo completo
       if (_lastAuthUid === user.uid && window._tenantId) {
         window._currentAuthUser = user;
@@ -250,18 +253,21 @@ function toast(msg, type='ok') {
       window.dispatchEvent(new Event('firebaseReady'));
 
     }else{
-      // Desanexar listener de licença ao deslogar
-      if (_licencaListenerRef) { try { _licencaListenerRef.off(); } catch(e) {} _licencaListenerRef = null; }
-      _lastAuthUid = null;
-      window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;window._userRole=null;
-      window._authResolved=true;
-      // Só redireciona para login quando o Firebase já respondeu definitivamente (sem user)
-      // e não estiver em modo booking público
-      if (!window._skipAuth) {
-        document.getElementById('loginScreen').style.display='flex';
-        var btn=document.getElementById('btnLogin');
-        if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
-      }
+      // Debounce: espera 3s antes de mostrar login — evita logout por oscilação momentânea de rede
+      _logoutTimer = setTimeout(function() {
+        _logoutTimer = null;
+        // Desanexar listener de licença ao deslogar
+        if (_licencaListenerRef) { try { _licencaListenerRef.off(); } catch(e) {} _licencaListenerRef = null; }
+        _lastAuthUid = null;
+        window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;window._userRole=null;
+        window._authResolved=true;
+        // Só redireciona para login quando não estiver em modo booking público
+        if (!window._skipAuth) {
+          document.getElementById('loginScreen').style.display='flex';
+          var btn=document.getElementById('btnLogin');
+          if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
+        }
+      }, 3000); // 3 segundos de tolerância para reconexão
     }
   });
 
