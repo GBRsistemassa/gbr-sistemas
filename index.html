@@ -3431,9 +3431,8 @@ async function initApp() {
   ]);
 
   // Verificar se usuário é admin — usa window._userRole definido no login (via userTenants)
-  const email = window._currentAuthUser?.email || '';
-  const userRole = window._userRole || 'admin';
-  if (userRole === 'admin') {
+  const userRole = window._userRole || 'adm1';
+  if (userRole === 'adm1' || userRole === 'adm2') {
     document.getElementById('adminSection').style.display = '';
     document.getElementById('adminMenuItem').style.display = '';
   }
@@ -3474,7 +3473,6 @@ async function initApp() {
       }
     } catch(e) { console.warn('Evo config:', e); }
   })();
-  verificarSessaoAtiva();
   iniciarPresencaRealtime();
   carregarAparencia();
   verificarNPSUrl();
@@ -7375,17 +7373,6 @@ function iniciarPresencaRealtime(){
 }
 
 // ════════════════════════════════════════════
-// VALIDAÇÃO DE SESSÃO — REDIRECIONAR PARA LOGIN
-// ════════════════════════════════════════════
-function verificarSessaoAtiva(){
-  // Verificar periodicamente se sessão ainda é válida
-  setInterval(()=>{
-    if(!window._currentAuthUser&&!document.getElementById('loginScreen').style.display.includes('none')===false){
-      document.getElementById('loginScreen').style.display='flex';
-    }
-  },30000); // verifica a cada 30s
-}
-
 // ============================================================
 // SISTEMA DE PERMISSÕES — ADM1 / ADM2 / OPERADOR
 // ============================================================
