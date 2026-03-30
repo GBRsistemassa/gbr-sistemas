@@ -54,8 +54,18 @@ function toast(msg, type='ok') {
     catch(err){toast('E-mail ou senha incorretos','err');btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
   };
 
+  // Guard: evita re-inicialização completa quando Firebase renova token
+  var _lastAuthUid = null;
+  var _licencaListenerRef = null;
+
   _fbAuth.onAuthStateChanged(async function(user){
     if(user){
+      // Se já inicializou para este mesmo UID, não re-executa o fluxo completo
+      if (_lastAuthUid === user.uid && window._tenantId) {
+        window._currentAuthUser = user;
+        return;
+      }
+      _lastAuthUid = user.uid;
       window._currentAuthUser=user;window._firebaseReady=true;
 
       // 1. Identificar tenant do usuario
@@ -196,8 +206,12 @@ function toast(msg, type='ok') {
       // 9. Notificacoes do Super Admin
       setTimeout(verificarNotificacoesGlobais,3000);
 
-      // 10. Listener em TEMPO REAL para Kill Switch
-      _fbDB.ref('tenants/'+window._tenantId+'/licenca').on('value',function(snap){
+      // 10. Listener em TEMPO REAL para Kill Switch (desanexa anterior se existir)
+      if (_licencaListenerRef) {
+        try { _licencaListenerRef.off(); } catch(e) {}
+      }
+      _licencaListenerRef = _fbDB.ref('tenants/'+window._tenantId+'/licenca');
+      _licencaListenerRef.on('value',function(snap){
         var licRT=snap.val()||{};
         if(licRT.killSwitch===true){
           document.getElementById('lockScreen').style.display='flex';
@@ -216,18 +230,26 @@ function toast(msg, type='ok') {
       });
 
       // Registrar ultimo acesso para saude da base
-      try { _fbDB.ref('tenants/'+window._tenantId+'/ultimoAcesso').set(new Date().toISOString()); } catch(e){}
+      if (window._tenantId) {
+        try { _fbDB.ref('tenants/'+window._tenantId+'/ultimoAcesso').set(new Date().toISOString()); } catch(e){}
+      }
 
       window._authResolved=true;
       window.dispatchEvent(new Event('firebaseReady'));
 
     }else{
+      // Desanexar listener de licença ao deslogar
+      if (_licencaListenerRef) { try { _licencaListenerRef.off(); } catch(e) {} _licencaListenerRef = null; }
+      _lastAuthUid = null;
       window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;window._userRole=null;
       window._authResolved=true;
       // Só redireciona para login quando o Firebase já respondeu definitivamente (sem user)
-      document.getElementById('loginScreen').style.display='flex';
-      var btn=document.getElementById('btnLogin');
-      if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
+      // e não estiver em modo booking público
+      if (!window._skipAuth) {
+        document.getElementById('loginScreen').style.display='flex';
+        var btn=document.getElementById('btnLogin');
+        if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
+      }
     }
   });
 
