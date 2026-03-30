@@ -13,6 +13,16 @@
 <title>GBR Sistemas — Plataforma de Gestão</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 
+<!-- Esconder app imediatamente quando for link público de agendamento -->
+<script>
+(function(){
+  if(new URLSearchParams(window.location.search).get('book')){
+    document.documentElement.style.setProperty('--hide-app','none');
+    document.write('<style>#topbar,#sidebar,#main,#mobileMenu,#loginScreen{display:none!important}</style>');
+  }
+})();
+</script>
+
 <!-- Toast disponível globalmente antes do module Firebase carregar -->
 <script>
 function toast(msg, type='ok') {
@@ -65,6 +75,8 @@ function toast(msg, type='ok') {
         window._currentAuthUser = user;
         return;
       }
+      // Ignorar usuário anônimo (usado pelo booking público)
+      if (user.isAnonymous) return;
       _lastAuthUid = user.uid;
       window._currentAuthUser=user;window._firebaseReady=true;
 
@@ -4213,32 +4225,45 @@ var _bkpHorSel = null;   // horário selecionado
 
 async function iniciarBookingPublico(tenantId) {
   _bkpTid = tenantId;
-  document.getElementById('bookingPublico').style.display = 'block';
-  document.getElementById('loginScreen').style.display = 'none';
-  // Ocultar topbar e sidebar (contexto público)
-  var tb = document.getElementById('topbar');
-  var sb = document.getElementById('sidebar');
-  var mn = document.getElementById('main');
-  if (tb) tb.style.display = 'none';
-  if (sb) sb.style.display = 'none';
-  if (mn) mn.style.display = 'none';
+
+  // Garantir que os elementos do app estão ocultos
+  ['topbar','sidebar','main','mobileMenu','loginScreen'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  // Mostrar overlay de booking
+  var bkpEl = document.getElementById('bookingPublico');
+  if (bkpEl) bkpEl.style.display = 'block';
+
+  // Autenticar anonimamente para poder ler o Firebase
+  try {
+    var user = _fbAuth.currentUser;
+    if (!user) {
+      await _fbAuth.signInAnonymously();
+    }
+  } catch(e) {
+    // Continua mesmo sem auth — tentará leitura assim mesmo
+  }
 
   // Carregar empresa e config
   try {
-    var snapEmp = await window._fbGet(window._fbRef(window._db, 'tenants/'+tenantId+'/empresa'));
+    var snapEmp = await _fbDB.ref('tenants/'+tenantId+'/empresa').once('value');
     var emp = snapEmp.val() || {};
     var empNome = emp.nome || emp.razaoSocial || 'GBR Sistemas';
-    document.getElementById('bkpEmpNome').textContent = empNome.toUpperCase();
+    var empNomeEl = document.getElementById('bkpEmpNome');
+    if (empNomeEl) empNomeEl.textContent = empNome.toUpperCase();
     document.title = empNome + ' — Agendar Online';
   } catch(e) {}
 
   try {
-    var snapCfg = await window._fbGet(window._fbRef(window._db, 'tenants/'+tenantId+'/bookingConfig'));
+    var snapCfg = await _fbDB.ref('tenants/'+tenantId+'/bookingConfig').once('value');
     _bkpCfg = snapCfg.val() || {};
   } catch(e) { _bkpCfg = {}; }
 
   if (!_bkpCfg.ativo) {
-    document.getElementById('bkpP1').innerHTML = '<div style="text-align:center;padding:30px"><div style="font-size:36px;margin-bottom:12px">⏸️</div><div style="font-size:15px;font-weight:600;margin-bottom:8px">Agendamento online indisponível</div><div style="font-size:13px;color:var(--muted2)">O agendamento online está temporariamente desativado.<br>Entre em contato com a empresa para agendar.</div></div>';
+    var p1 = document.getElementById('bkpP1');
+    if (p1) p1.innerHTML = '<div style="text-align:center;padding:30px"><div style="font-size:36px;margin-bottom:12px">⏸️</div><div style="font-size:15px;font-weight:600;margin-bottom:8px">Agendamento online indisponível</div><div style="font-size:13px;color:var(--muted2)">O agendamento online está temporariamente desativado.<br>Entre em contato com a empresa para agendar.</div></div>';
     return;
   }
 
@@ -4251,7 +4276,7 @@ async function bkpRenderServicos() {
   var svIds = _bkpCfg.servicos || [];
   if (!svIds.length) { el.innerHTML = '<div style="color:var(--muted2);font-size:13px;padding:10px">Nenhum serviço disponível no momento.</div>'; return; }
   try {
-    var snap = await window._fbGet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/servicos'));
+    var snap = await _fbDB.ref('tenants/'+_bkpTid+'/servicos').once('value');
     var todos = snap.val() || [];
     if (!Array.isArray(todos)) todos = Object.values(todos);
     var disp = todos.filter(function(s){ return svIds.includes(String(s.id)) || svIds.includes(s.id); });
@@ -4315,7 +4340,7 @@ async function bkpRenderHorarios() {
   // Buscar agendamentos do dia para bloquear horários
   var ocupados = [];
   try {
-    var snap = await window._fbGet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/agendamentos'));
+    var snap = await _fbDB.ref('tenants/'+_bkpTid+'/agendamentos').once('value');
     var ags = snap.val() || [];
     if (!Array.isArray(ags)) ags = Object.values(ags);
     ocupados = ags.filter(function(a){ return a.data===_bkpDataSel && a.status!=='Cancelado'; }).map(function(a){ return a.hora||''; });
@@ -4394,11 +4419,11 @@ async function bkpConfirmar() {
   };
 
   try {
-    var snap = await window._fbGet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/agendamentos'));
+    var snap = await _fbDB.ref('tenants/'+_bkpTid+'/agendamentos').once('value');
     var existing = snap.val() || [];
     if (!Array.isArray(existing)) existing = Object.values(existing);
     existing.push(agend);
-    await window._fbSet(window._fbRef(window._db, 'tenants/'+_bkpTid+'/agendamentos'), existing);
+    await _fbDB.ref('tenants/'+_bkpTid+'/agendamentos').set(existing);
 
     // Mostrar confirmação
     var d = new Date(_bkpDataSel+'T12:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
