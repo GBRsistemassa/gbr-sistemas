@@ -64,22 +64,28 @@ function toast(msg, type='ok') {
     catch(err){toast('E-mail ou senha incorretos','err');btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
   };
 
-  // Guard: evita re-inicialização completa quando Firebase renova token
-  var _lastAuthUid = null;
+  // ── AUTH STATE MANAGER ──────────────────────────────────────────
+  var _lastAuthUid     = null;
   var _licencaListenerRef = null;
-  var _logoutTimer = null; // debounce: aguarda antes de mostrar login (evita flicker por rede)
+  var _logoutTimer     = null;
+  var _authFirstCall   = true;  // TRUE só na 1ª chamada: distingue init de mudança real
+  var _licencaSetupUid = null;  // UID do último listener criado: evita duplicação
 
   _fbAuth.onAuthStateChanged(async function(user){
-    if(user){
-      // Cancelar qualquer timer de logout pendente (usuário reconectou)
+    var isFirst = _authFirstCall;
+    _authFirstCall = false;
+
+    /* ── USUÁRIO PRESENTE ─────────────────────────────────────── */
+    if(user && !user.isAnonymous){
+      // Cancelar qualquer timer de logout pendente
       if (_logoutTimer) { clearTimeout(_logoutTimer); _logoutTimer = null; }
-      // Se já inicializou para este mesmo UID, não re-executa o fluxo completo
+
+      // Token refresh silencioso: mesmo UID + sistema já carregado → só atualiza referência
       if (_lastAuthUid === user.uid && window._tenantId) {
         window._currentAuthUser = user;
         return;
       }
-      // Ignorar usuário anônimo (usado pelo booking público)
-      if (user.isAnonymous) return;
+
       _lastAuthUid = user.uid;
       window._currentAuthUser=user;window._firebaseReady=true;
 
@@ -221,28 +227,26 @@ function toast(msg, type='ok') {
       // 9. Notificacoes do Super Admin
       setTimeout(verificarNotificacoesGlobais,3000);
 
-      // 10. Listener em TEMPO REAL para Kill Switch (desanexa anterior se existir)
-      if (_licencaListenerRef) {
-        try { _licencaListenerRef.off(); } catch(e) {}
-      }
-      _licencaListenerRef = _fbDB.ref('tenants/'+window._tenantId+'/licenca');
-      _licencaListenerRef.on('value',function(snap){
-        var licRT=snap.val()||{};
-        if(licRT.killSwitch===true){
-          document.getElementById('lockScreen').style.display='flex';
-          document.getElementById('lockMsg').textContent='Acesso bloqueado pelo administrador em tempo real.';
-          document.querySelectorAll('.page-content, #main, #sidebar').forEach(function(el){
-            el.style.pointerEvents='none';el.style.opacity='0.3';
-          });
-        }
-        if(licRT.expiracao){
-          var agoraRT=new Date();var expRT=new Date(licRT.expiracao);
-          if(agoraRT>expRT){
+      // 10. Listener licença — criar apenas 1× por sessão de usuário (evita acumulação)
+      if (_licencaSetupUid !== user.uid) {
+        _licencaSetupUid = user.uid;
+        if (_licencaListenerRef) { try { _licencaListenerRef.off(); } catch(e){} }
+        _licencaListenerRef = _fbDB.ref('tenants/'+window._tenantId+'/licenca');
+        _licencaListenerRef.on('value',function(snap){
+          // Guard: só atua se sessão ainda está ativa
+          if (!window._tenantId || !window._currentAuthUser) return;
+          var licRT = snap.val();
+          if (!licRT) return;
+          // Apenas killSwitch em tempo-real — expiração já foi verificada no login
+          if (licRT.killSwitch === true) {
             document.getElementById('lockScreen').style.display='flex';
-            document.getElementById('lockMsg').textContent='Licenca expirada em '+expRT.toLocaleDateString('pt-BR')+'.';
+            document.getElementById('lockMsg').textContent='Acesso bloqueado pelo administrador.';
+            document.querySelectorAll('#main,#sidebar').forEach(function(el){
+              el.style.pointerEvents='none'; el.style.opacity='0.3';
+            });
           }
-        }
-      });
+        });
+      }
 
       // Registrar ultimo acesso para saude da base
       if (window._tenantId) {
@@ -252,22 +256,46 @@ function toast(msg, type='ok') {
       window._authResolved=true;
       window.dispatchEvent(new Event('firebaseReady'));
 
-    }else{
-      // Debounce: espera 3s antes de mostrar login — evita logout por oscilação momentânea de rede
-      _logoutTimer = setTimeout(function() {
-        _logoutTimer = null;
-        // Desanexar listener de licença ao deslogar
-        if (_licencaListenerRef) { try { _licencaListenerRef.off(); } catch(e) {} _licencaListenerRef = null; }
-        _lastAuthUid = null;
-        window._currentAuthUser=null;window._firebaseReady=false;window._tenantId=null;window._userRole=null;
+    /* ── USUÁRIO AUSENTE ──────────────────────────────────────── */
+    } else {
+      if (isFirst) {
+        // 1ª chamada com null = sem sessão salva → login imediato (sem debounce)
+        if (_licencaListenerRef) { try { _licencaListenerRef.off(); } catch(e){} _licencaListenerRef = null; }
+        _licencaSetupUid = null; _lastAuthUid = null;
+        window._currentAuthUser=null; window._firebaseReady=false;
+        window._tenantId=null; window._userRole=null;
         window._authResolved=true;
-        // Só redireciona para login quando não estiver em modo booking público
         if (!window._skipAuth) {
           document.getElementById('loginScreen').style.display='flex';
           var btn=document.getElementById('btnLogin');
           if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
         }
-      }, 3000); // 3 segundos de tolerância para reconexão
+      } else {
+        // Chamada posterior com null = oscilação de rede ou logout real
+        // Não empilhar timers: se já tem um rodando, ignora
+        if (_logoutTimer) return;
+        _logoutTimer = setTimeout(async function(){
+          _logoutTimer = null;
+          // Double-check: Firebase pode ter recuperado o usuário no intervalo
+          var stillUser = _fbAuth.currentUser;
+          if (stillUser && !stillUser.isAnonymous) {
+            // Reconectou — forçar re-init limpo na próxima chamada
+            _lastAuthUid = null;
+            return;
+          }
+          // Genuinamente deslogado — limpar estado
+          if (_licencaListenerRef) { try { _licencaListenerRef.off(); } catch(e){} _licencaListenerRef = null; }
+          _licencaSetupUid = null; _lastAuthUid = null;
+          window._currentAuthUser=null; window._firebaseReady=false;
+          window._tenantId=null; window._userRole=null;
+          window._authResolved=true;
+          if (!window._skipAuth) {
+            document.getElementById('loginScreen').style.display='flex';
+            var btn=document.getElementById('btnLogin');
+            if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
+          }
+        }, 5000); // 5s para token refresh completar
+      }
     }
   });
 
