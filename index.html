@@ -595,6 +595,10 @@ body.light .badge{opacity:.9}
   .fgrid.c3,.fgrid.c4{grid-template-columns:1fr 1fr}
   table{font-size:11px}th,td{padding:7px 8px}
   .gs-box{width:95vw}
+  /* Topbar tablet: ocultar data e label sync */
+  .tb-date{display:none}
+  #syncLabel{display:none}
+  .tb-logo{width:160px;font-size:18px}
 }
 @media(max-width:600px){
   .cg4,.cg3{grid-template-columns:1fr 1fr}
@@ -608,6 +612,16 @@ body.light .badge{opacity:.9}
   th{display:none}.tw table,.tw thead,.tw tbody,.tw tr,.tw td{display:block;width:100%}
   .tw td{padding:6px 12px;border-top:1px solid var(--border)}
   .tw td:first-child{font-weight:600;padding-top:12px}
+  /* Topbar mobile: compactar ao máximo */
+  .tb-logo{width:auto;font-size:16px;padding:0 10px;letter-spacing:1px}
+  .tb-center{padding:0 6px;gap:6px}
+  /* Ocultar texto do botão Sair e Busca no mobile */
+  #btnLogout .btn-label{display:none}
+  .tb-right{gap:4px}
+  .user-chip{padding:4px 8px}
+  #planoBadge{display:none!important}
+  /* Ocultar botões menos essenciais no mobile */
+  #btnGlobalSearch .search-label{display:none}
 }
 </style>
 </head>
@@ -3200,13 +3214,47 @@ let isFB = false;
 window._evoConfig = window._evoConfig || null;
 window._evoConectado = window._evoConectado || false;
 
-window.addEventListener('firebaseReady', () => {
+// ── STATUS ONLINE/OFFLINE ────────────────────
+function atualizarStatusConexao(online) {
+  var dot   = document.getElementById('syncDot');
+  var label = document.getElementById('syncLabel');
+  if (!dot || !label) return;
+  if (online) {
+    dot.className   = 'dot dot-green';
+    label.textContent = 'SINCRONIZADO';
+    label.style.color = 'var(--green)';
+  } else {
+    dot.className   = 'dot dot-red';
+    label.textContent = 'OFFLINE';
+    label.style.color = 'var(--red)';
+  }
+}
+
+// Listener Firebase .info/connected — reflete conexão real com o Realtime DB
+window.addEventListener('firebaseReady', function() {
   isFB = !!window._firebaseReady && !!window._db;
-  document.getElementById('syncDot').className = 'dot ' + (isFB ? 'dot-green' : 'dot-red');
-  document.getElementById('syncLabel').textContent = isFB ? 'SINCRONIZADO' : 'OFFLINE';
+  atualizarStatusConexao(isFB && navigator.onLine);
+
+  // Listener em tempo real da conexão Firebase
+  if (window._db) {
+    try {
+      var connRef = window._fbRef(window._db, '.info/connected');
+      window._fbOnValue(connRef, function(snap) {
+        var fbConn = snap.val() === true;
+        atualizarStatusConexao(fbConn && navigator.onLine);
+      });
+    } catch(e) {
+      // fallback: usar apenas navigator.onLine
+    }
+  }
+
   auditLog('login', 'Acesso ao sistema');
   initApp();
 }, { once: true });
+
+// Fallback: eventos de rede do browser
+window.addEventListener('online',  function() { atualizarStatusConexao(true);  });
+window.addEventListener('offline', function() { atualizarStatusConexao(false); });
 
 // ── DATA LAYER ──────────────────────────────
 async function dbGet(key) {
