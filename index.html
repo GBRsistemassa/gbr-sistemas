@@ -4202,10 +4202,14 @@ async function iniciarBookingPublico(tenantId) {
   _bkpTid = tenantId;
 
   // Garantir que os elementos do app estão ocultos
-  ['topbar','sidebar','main','mobileMenu','loginScreen'].forEach(function(id){
+  // NOTA: 'main' não pode ser ocultado pois bookingPublico é filho dele
+  ['topbar','sidebar','mobileMenu','loginScreen'].forEach(function(id){
     var el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
+  // Ocultar conteúdo interno do main sem esconder o próprio main
+  var mainEl = document.getElementById('main');
+  if (mainEl) { Array.from(mainEl.children).forEach(function(c){ if(c.id !== 'bookingPublico') c.style.display='none'; }); }
 
   // Mostrar overlay de booking
   var bkpEl = document.getElementById('bookingPublico');
