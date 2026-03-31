@@ -294,7 +294,7 @@ function toast(msg, type='ok') {
             var btn=document.getElementById('btnLogin');
             if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
           }
-        }, 5000); // 5s para token refresh completar
+        }, 10000); // 10s para token refresh completar (aumentado para estabilidade)
       }
     }
   });
@@ -3780,7 +3780,7 @@ function substituirVarsWA(msg, cli, ag, emp) {
   return (msg||'')
     .replace(/\{nome\}/g,    (cli&&cli.nome)||'Cliente')
     .replace(/\{telefone\}/g,(cli&&cli.telefone)||'')
-    .replace(/\{data\}/g,    (ag&&ag.data) ? fmtDate(ag.data) : hoje())
+    .replace(/\{data\}/g,    (ag&&ag.data) ? fmtDate(ag.data) : fmtDate(today()))
     .replace(/\{hora\}/g,    (ag&&ag.hora)||'')
     .replace(/\{servico\}/g, svs || (ag&&ag.servicos&&ag.servicos[0]&&ag.servicos[0].nome)||'Serviço')
     .replace(/\{valor\}/g,   (ag&&ag.total) ? fmt(ag.total) : '')
