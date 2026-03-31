@@ -3248,7 +3248,7 @@ window.addEventListener('offline', function() { atualizarStatusConexao(false); }
 // ── DATA LAYER ──────────────────────────────
 async function dbGet(key) {
   const tid = window._tenantId;
-  const OBJ_KEYS = ['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas','caixaDia','evolutionConfig','waAutomacoes'];
+  const OBJ_KEYS = ['config','insumos','regras','empresa','roles','custosFixos','fichasTecnicas','caixaDia','evolutionConfig','waAutomacoes','bookingConfig','aparencia','backupConfig'];
   if (!tid) { console.warn('dbGet("'+key+'") chamado sem tenantId — ignorado'); return OBJ_KEYS.includes(key) ? {} : []; }
   if (isFB && window._db) {
     try {
