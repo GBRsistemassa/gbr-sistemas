@@ -3237,6 +3237,11 @@ window.addEventListener('firebaseReady', function() {
     }
   }
 
+  if (window._skipAuth) {
+    var _bkId = new URLSearchParams(window.location.search).get('book');
+    if (_bkId) setTimeout(function(){ iniciarBookingPublico(_bkId); }, 50);
+    return; // modo booking — não inicializa o app
+  }
   auditLog('login', 'Acesso ao sistema');
   initApp();
 }, { once: true });
@@ -7437,6 +7442,7 @@ if (_origExportBackup2) {
 
 // Carregar role apos login
 window.addEventListener('firebaseReady', function() {
+  if (window._skipAuth) return; // modo booking — não carregar role/plano
   carregarRoleUsuario();
   aplicarRestricaoPlano();
 }, { once: true });
