@@ -193,17 +193,27 @@ function toast(msg, type='ok') {
         }
       } catch(e){}
 
-      // 8. Carregar modulos do plano contratado
+      // 8. Carregar modulos do plano contratado (com suporte a override por tenant)
       try {
         var planoAtual=(lic.plano||'basico').toLowerCase();
         window._planoAtual=planoAtual;
         var snapPlano=await _fbDB.ref('planos/'+planoAtual+'/modulos').once('value');
-        var modPlano=snapPlano.val();
-        if(modPlano&&Object.keys(modPlano).length>0){
+        var modPlano=snapPlano.val()||{};
+
+        // Override individual do tenant (configurado pelo Admin GBR)
+        var modOverride=lic.modulosOverride||null;
+
+        if(modOverride&&Object.keys(modOverride).length>0){
+          // Override tem prioridade absoluta — admin configurou módulos específicos
+          window._enabledModules=modOverride;
+          window._modulosOverrideAtivo=true;
+        } else if(modPlano&&Object.keys(modPlano).length>0){
           window._enabledModules=modPlano;
+          window._modulosOverrideAtivo=false;
         } else {
           var snapMods=await _fbDB.ref('tenants/'+window._tenantId+'/modules').once('value');
           window._enabledModules=snapMods.val()||{};
+          window._modulosOverrideAtivo=false;
         }
         setTimeout(function(){
           var badgePlano=document.getElementById('planoBadge');
