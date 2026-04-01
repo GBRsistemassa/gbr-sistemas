@@ -256,6 +256,11 @@ function toast(msg, type='ok') {
       window._authResolved=true;
       window.dispatchEvent(new Event('firebaseReady'));
 
+    /* ── USUÁRIO ANÔNIMO (booking público) — ignorar completamente ── */
+    } else if (user && user.isAnonymous) {
+      // Login anônimo usado pelo agendamento público — não altera UI nem fluxo de auth
+      return;
+
     /* ── USUÁRIO AUSENTE ──────────────────────────────────────── */
     } else {
       if (isFirst) {
@@ -294,7 +299,7 @@ function toast(msg, type='ok') {
             var btn=document.getElementById('btnLogin');
             if(btn){btn.disabled=false;btn.innerHTML='&#9658; Entrar';}
           }
-        }, 10000); // 10s para token refresh completar (aumentado para estabilidade)
+        }, 20000); // 20s para token refresh completar — evita logout falso por oscilação de rede
       }
     }
   });
@@ -4221,13 +4226,22 @@ async function iniciarBookingPublico(tenantId) {
   if (bkpEl) bkpEl.style.display = 'block';
 
   // Autenticar anonimamente para poder ler o Firebase
-  try {
-    var user = _fbAuth.currentUser;
-    if (!user) {
-      await _fbAuth.signInAnonymously();
+  // Tentativas com retry para evitar falha por oscilação de rede
+  var _bkpAuthOk = false;
+  for (var _bkpTry = 0; _bkpTry < 3; _bkpTry++) {
+    try {
+      var user = _fbAuth.currentUser;
+      if (!user) { await _fbAuth.signInAnonymously(); }
+      _bkpAuthOk = true;
+      break;
+    } catch(e) {
+      if (_bkpTry < 2) await new Promise(function(r){ setTimeout(r, 1500); });
     }
-  } catch(e) {
-    // Continua mesmo sem auth — tentará leitura assim mesmo
+  }
+  if (!_bkpAuthOk) {
+    var p1err = document.getElementById('bkpP1');
+    if (p1err) p1err.innerHTML = '<div style="text-align:center;padding:30px"><div style="font-size:36px;margin-bottom:12px">⚠️</div><div style="font-size:15px;font-weight:600;margin-bottom:8px">Falha de conexão</div><div style="font-size:13px;color:var(--muted2)">Não foi possível conectar. Verifique sua internet e recarregue a página.</div></div>';
+    return;
   }
 
   // Carregar empresa e config
@@ -4245,7 +4259,8 @@ async function iniciarBookingPublico(tenantId) {
     _bkpCfg = snapCfg.val() || {};
   } catch(e) { _bkpCfg = {}; }
 
-  if (!_bkpCfg.ativo) {
+  // ativo===undefined significa que a config nunca foi salva → tratar como ativo
+  if (_bkpCfg.ativo === false) {
     var p1 = document.getElementById('bkpP1');
     if (p1) p1.innerHTML = '<div style="text-align:center;padding:30px"><div style="font-size:36px;margin-bottom:12px">⏸️</div><div style="font-size:15px;font-weight:600;margin-bottom:8px">Agendamento online indisponível</div><div style="font-size:13px;color:var(--muted2)">O agendamento online está temporariamente desativado.<br>Entre em contato com a empresa para agendar.</div></div>';
     return;
