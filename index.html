@@ -7891,6 +7891,127 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
+
+/* ════════════════════════════════════════════
+   GBR CMS BRIDGE — Recebe comandos do Admin
+   Carrega CSS/JS/Injeções do Firebase em tempo real
+════════════════════════════════════════════ */
+(function() {
+  // ── Listener postMessage do iframe admin ──
+  window.addEventListener('message', function(e) {
+    var d = e.data || {};
+    if (!d.type || !d.type.startsWith('cms_')) return;
+    if (d.type === 'cms_style_preview') {
+      if (d.ac)   document.documentElement.style.setProperty('--accent', d.ac);
+      if (d.ac2)  document.documentElement.style.setProperty('--accent2', d.ac2);
+      if (d.bg)   document.documentElement.style.setProperty('--bg', d.bg);
+      if (d.name) document.querySelectorAll('.tb-logo,.login-logo,.logo').forEach(function(el){el.textContent=d.name;});
+    }
+    if (d.type === 'cms_css_preview') {
+      var s = document.getElementById('__cms_css_preview__');
+      if (!s) { s = document.createElement('style'); s.id = '__cms_css_preview__'; document.head.appendChild(s); }
+      s.textContent = d.css || '';
+    }
+    if (d.type === 'cms_js_exec') {
+      try { var fn = new Function(d.js); fn(); } catch(err) { console.warn('[CMS JS]', err); }
+    }
+    if (d.type === 'cms_inject_preview') {
+      var target = d.pos === 'bottom' ? document.getElementById('main') : document.getElementById('main');
+      if (target) {
+        var div = document.getElementById('__cms_inject_preview__') || document.createElement('div');
+        div.id = '__cms_inject_preview__';
+        div.innerHTML = d.code || '';
+        if (d.pos === 'top') target.insertBefore(div, target.firstChild);
+        else target.appendChild(div);
+        // Execute any scripts inside
+        div.querySelectorAll('script').forEach(function(sc) {
+          try { var fn = new Function(sc.textContent); fn(); } catch(err) {}
+        });
+      }
+    }
+  });
+
+  // ── Carregar customizações do Firebase após login ──
+  window.addEventListener('firebaseReady', function() {
+    if (!window._tenantId || !window._db) return;
+    var tid = window._tenantId;
+
+    // 1. CSS customizado
+    window._db.ref('tenants/'+tid+'/cms_css').once('value').then(function(snap) {
+      var css = snap.val();
+      if (css) {
+        var el = document.getElementById('__cms_css__');
+        if (!el) { el = document.createElement('style'); el.id = '__cms_css__'; document.head.appendChild(el); }
+        el.textContent = css;
+      }
+    });
+
+    // 2. JS customizado
+    window._db.ref('tenants/'+tid+'/cms_js').once('value').then(function(snap) {
+      var js = snap.val();
+      if (js) {
+        try { var fn = new Function(js); fn(); } catch(err) { console.warn('[CMS JS]', err.message); }
+      }
+    });
+
+    // 3. Notificação do admin
+    window._db.ref('tenants/'+tid+'/cms_notif').once('value').then(function(snap) {
+      var notif = snap.val();
+      if (notif && !notif.lido) {
+        setTimeout(function() {
+          if (window.toast) toast(notif.msg, notif.tipo || 'info');
+        }, 2500);
+        // Marcar como lido
+        window._db.ref('tenants/'+tid+'/cms_notif/lido').set(true);
+      }
+    });
+
+    // 4. Blocos HTML/JS injetados
+    window._db.ref('tenants/'+tid+'/cms_injecoes').once('value').then(function(snap) {
+      var injs = snap.val() || {};
+      Object.entries(injs).forEach(function(kv) {
+        var id = kv[0], inj = kv[1];
+        if (inj.ativo === false) return;
+        var container;
+        if (inj.pos === 'top') {
+          container = document.getElementById('main');
+          if (!container) return;
+          var div = document.createElement('div');
+          div.id = '__cms_inj_'+id+'__';
+          div.innerHTML = inj.code || '';
+          container.insertBefore(div, container.firstChild);
+        } else if (inj.pos === 'bottom') {
+          container = document.getElementById('main');
+          if (!container) return;
+          var div = document.createElement('div');
+          div.id = '__cms_inj_'+id+'__';
+          div.innerHTML = inj.code || '';
+          container.appendChild(div);
+        } else if (inj.pos === 'sidebar') {
+          container = document.getElementById('sidebar');
+          if (!container) return;
+          var div = document.createElement('div');
+          div.id = '__cms_inj_'+id+'__';
+          div.innerHTML = inj.code || '';
+          container.appendChild(div);
+        } else if (inj.pos === 'global') {
+          var el = document.createElement('div');
+          el.id = '__cms_inj_'+id+'__';
+          el.innerHTML = inj.code || '';
+          document.body.appendChild(el);
+        }
+        // Execute scripts inside injected block
+        var div2 = document.getElementById('__cms_inj_'+id+'__');
+        if (div2) div2.querySelectorAll('script').forEach(function(sc) {
+          try { var fn = new Function(sc.textContent); fn(); } catch(err) {}
+        });
+      });
+    });
+
+  }, { once: true });
+})();
+/* FIM GBR CMS BRIDGE */
+
 </script>
 </body>
 </html>
