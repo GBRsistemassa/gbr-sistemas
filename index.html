@@ -1728,7 +1728,23 @@ body.light .badge{opacity:.9}
           </div>
         </div>
         <div class="admin-card">
-          <div class="admin-card-title">CONFIGURAÇÕES DO SISTEMA</div>
+          <!-- ── DADOS DA EMPRESA ── -->
+          <div class="admin-card-title">🏢 DADOS DA EMPRESA</div>
+          <div style="font-size:12px;color:var(--muted2);margin-bottom:14px">Estas informações aparecem nos relatórios, impressões e na tela de agendamento online.</div>
+          <div class="fgrid c2" style="gap:10px;margin-bottom:14px">
+            <div class="fg cf"><label>Nome da Empresa *</label><input id="emp_nome" placeholder="Ex: Auto Estética Premium" oninput="previewNomeSist(this.value)"></div>
+            <div class="fg"><label>CNPJ</label><input id="emp_cnpj" placeholder="00.000.000/0000-00" oninput="mCNPJ(this)"></div>
+            <div class="fg"><label>Telefone / WhatsApp</label><input id="emp_tel" placeholder="(11) 99999-9999" oninput="mTel(this)"></div>
+            <div class="fg"><label>Cidade</label><input id="emp_cidade" placeholder="São Paulo"></div>
+            <div class="fg cf"><label>Endereço</label><input id="emp_end" placeholder="Rua, número, bairro"></div>
+            <div class="fg cf"><label>Horário de funcionamento</label><input id="emp_horario" placeholder="Seg-Sex 08:00-18:00, Sáb 08:00-13:00"></div>
+          </div>
+          <div style="margin-bottom:18px">
+            <button class="btn btn-primary" onclick="salvarEmpresa()">✓ Salvar Dados da Empresa</button>
+          </div>
+
+          <!-- ── CONFIGURAÇÕES DO SISTEMA ── -->
+          <div class="admin-card-title" style="margin-top:4px">CONFIGURAÇÕES DO SISTEMA</div>
           <div class="crow"><div><div style="font-size:13px">Exibir no cabeçalho de impressão</div></div><button class="toggle on" id="togImpressao" onclick="this.classList.toggle('on')"></button></div>
           <div class="crow"><div><div style="font-size:13px">Alertas de estoque no dashboard</div></div><button class="toggle on" id="togAlertaEst" onclick="this.classList.toggle('on')"></button></div>
           <div class="crow"><div><div style="font-size:13px">Exigir checklist antes de concluir</div></div><button class="toggle" id="togCheckObrig" onclick="this.classList.toggle('on')"></button></div>
@@ -4258,7 +4274,15 @@ async function iniciarBookingPublico(tenantId) {
   try {
     var snapEmp = await _fbDB.ref('tenants/'+tenantId+'/empresa').once('value');
     var emp = snapEmp.val() || {};
-    var empNome = emp.nome || emp.razaoSocial || 'GBR Sistemas';
+    // ── CORREÇÃO: usar style.name como fallback caso empresa.nome esteja vazio ──
+    var empNome = emp.nome || emp.razaoSocial || '';
+    if(!empNome){
+      try{
+        var snapStyle = await _fbDB.ref('tenants/'+tenantId+'/style').once('value');
+        var stl = snapStyle.val() || {};
+        empNome = stl.name || 'GBR Sistemas';
+      }catch(e2){ empNome = 'GBR Sistemas'; }
+    }
     var empNomeEl = document.getElementById('bkpEmpNome');
     if (empNomeEl) empNomeEl.textContent = empNome.toUpperCase();
     document.title = empNome + ' — Agendar Online';
@@ -6668,6 +6692,10 @@ async function carregarEmpresa(){
     if(prev)prev.innerHTML=`<img src="${ap.logo}" style="width:60px;height:60px;object-fit:contain;border-radius:8px">`;
     window._logoBase64=ap.logo;
   }
+  // ── Sincronizar nome do sistema: prioridade aparencia.sistNome, fallback empresa.nome ──
+  const nomeSist = ap.sistNome || e.nome || '';
+  const elSistNome = document.getElementById('empSistNome');
+  if(elSistNome) elSistNome.value = nomeSist;
   // ── Carregar TODOS os toggles do config ──────────
   const cfg=await dbGet('config')||{};
   const togOn=(id,val)=>{const el=document.getElementById(id);if(el)el.className='toggle'+(val===true?' on':'')};
@@ -6683,6 +6711,7 @@ async function salvarEmpresa(){
   // Salvar dados da empresa
   const e={nome:v('emp_nome'),cnpj:v('emp_cnpj'),tel:v('emp_tel'),
             end:v('emp_end'),cidade:v('emp_cidade'),horario:v('emp_horario')};
+  if(!e.nome){toast('Informe o nome da empresa!','err');return;}
   await dbSet('empresa',e);
   // ── Salvar TODOS os toggles no config ─────────────
   const cfg=await dbGet('config')||{};
@@ -6692,8 +6721,28 @@ async function salvarEmpresa(){
   cfg.togCheckObrig  = on('togCheckObrig');
   cfg.togNPS         = on('togNPS');
   await dbSet('config',cfg);
-  await auditLog('config','Dados da empresa e configurações salvas');
-  toast('✓ Configurações salvas!','ok');
+
+  // ── CORREÇÃO CRÍTICA: gravar style.name para que o agend.online e topbar reflitam o novo nome ──
+  try {
+    if(window._tenantId && window._db){
+      await window._db.ref('tenants/'+window._tenantId+'/style').update({name: e.nome});
+    }
+  } catch(ex){ console.warn('style.name update failed', ex); }
+
+  // ── Atualizar aparencia.sistNome em sincronia ──────
+  try {
+    const ap = await dbGet('aparencia') || {};
+    ap.sistNome = e.nome;
+    await dbSet('aparencia', ap);
+    const elSN = document.getElementById('empSistNome');
+    if(elSN) elSN.value = e.nome;
+  } catch(ex){}
+
+  // ── Atualizar topbar imediatamente sem recarregar ──
+  previewNomeSist(e.nome);
+
+  await auditLog('config','Dados da empresa e configurações salvas: '+e.nome);
+  toast('✓ Configurações salvas! Nome atualizado no agendamento online.','ok');
 }
 
 // ── AUDITORIA ────────────────────────────────
@@ -7582,7 +7631,17 @@ window.previewBorderRadius=function(v){document.documentElement.style.setPropert
 window.previewNomeSist=function(v){var logo=document.querySelector('.tb-logo');if(logo&&v){var parts=v.trim().split(/\s+/);if(parts.length>=2){var first=parts.slice(0,-1).join(' ');var last=parts[parts.length-1];logo.innerHTML=first+' <span>'+last+'</span>';}else{logo.innerHTML=v;}}}
 // ===== APARENCIA =====
 var _origSalvAp=salvarAparencia;
-salvarAparencia=async function(){var g=function(id){var el=document.getElementById(id);return el?el.value:'';};var ap={accent:g('empCorAccent')||'#4fc3f7',accent2:g('empCorAccent2')||'#ff7043',fontSize:g('empFontSize')||'14',borderRadius:g('empBorderRadius')||'14',sistNome:g('empSistNome')||'',tema:window._temaAtivo||'dark',fonte:window._fonteAtiva||'modern',logo:window._logoBase64||null,salvoEm:new Date().toISOString()};await dbSet('aparencia',ap);aplicarAparencia(ap);await auditLog('config','Aparencia salva');toast('Aparencia salva!','ok');};
+salvarAparencia=async function(){var g=function(id){var el=document.getElementById(id);return el?el.value:'';};var ap={accent:g('empCorAccent')||'#4fc3f7',accent2:g('empCorAccent2')||'#ff7043',fontSize:g('empFontSize')||'14',borderRadius:g('empBorderRadius')||'14',sistNome:g('empSistNome')||'',tema:window._temaAtivo||'dark',fonte:window._fonteAtiva||'modern',logo:window._logoBase64||null,salvoEm:new Date().toISOString()};await dbSet('aparencia',ap);aplicarAparencia(ap);
+// ── CORREÇÃO: sincronizar style.name e empresa.nome quando sistNome for preenchido ──
+if(ap.sistNome && window._tenantId && window._db){
+  try{
+    await window._db.ref('tenants/'+window._tenantId+'/style').update({name:ap.sistNome});
+    // Também atualizar empresa.nome se o campo emp_nome estiver preenchido com o mesmo valor
+    var empEl=document.getElementById('emp_nome');
+    if(empEl && !empEl.value) empEl.value=ap.sistNome;
+  }catch(ex){console.warn('style.name sync failed',ex);}
+}
+await auditLog('config','Aparencia salva');toast('Aparencia salva!','ok');};
 var _origAplicAp=aplicarAparencia;
 aplicarAparencia=function(ap){if(!ap)return;var r=document.documentElement.style;if(ap.accent)r.setProperty('--accent',ap.accent);if(ap.accent2)r.setProperty('--accent2',ap.accent2);if(ap.fontSize){document.body.style.fontSize=ap.fontSize+'px';var fs=document.getElementById('empFontSize');if(fs)fs.value=ap.fontSize;}if(ap.borderRadius){r.setProperty('--r2',ap.borderRadius+'px');var br=document.getElementById('empBorderRadius');if(br)br.value=ap.borderRadius;}if(ap.tema)setTimeout(function(){aplicarTema(ap.tema);},100);if(ap.fonte)setTimeout(function(){aplicarFonte(ap.fonte);},200);if(ap.logo){var p=document.getElementById('empLogoPreview');if(p)p.innerHTML='<img src="'+ap.logo+'" style="width:60px;height:60px;object-fit:contain">';var logo=document.querySelector('.tb-logo');if(logo)logo.innerHTML='<img src="'+ap.logo+'" style="height:32px;object-fit:contain;margin-right:6px">'+(ap.sistNome?'<span style="margin-left:4px">'+ap.sistNome+'</span>':'');window._logoBase64=ap.logo;}else if(ap.sistNome){previewNomeSist(ap.sistNome);}var sf=function(id,v){var el=document.getElementById(id);if(el&&v!==undefined)el.value=v;};sf('empCorAccent',ap.accent);sf('empCorAccent2',ap.accent2);sf('empSistNome',ap.sistNome||'');};
 var _origCarrAp=carregarAparencia;
