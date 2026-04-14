@@ -540,6 +540,9 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
     <div class="form-group"><label>E-mail</label><input type="email" id="loginEmail" placeholder="seu@email.com" autocomplete="email"></div>
     <div class="form-group"><label>Senha</label><input type="password" id="loginSenha" placeholder="Sua senha" autocomplete="current-password"></div>
     <button class="btn btn-primary btn-lg" onclick="fazerLogin()" style="margin-top:6px">Entrar no Sistema</button>
+    <div style="margin-top:16px;text-align:center">
+      <button class="btn btn-ghost btn-sm" onclick="mostrarCredenciais()" style="font-size:11px;color:var(--text3)">Esqueci minhas credenciais</button>
+    </div>
   </div>
 </div>
 
@@ -1802,7 +1805,7 @@ function concluirSetup() {
   if (!email || !email.includes('@')) { showErr('Informe um e-mail válido.'); return; }
   if (senha.length < 8) { showErr('A senha deve ter no mínimo 8 caracteres.'); return; }
   if (senha !== conf) { showErr('As senhas não conferem.'); return; }
-  localStorage.setItem('gbr_sa_email', email);
+  localStorage.setItem('gbr_sa_email', email.toLowerCase());
   seedDados(email, senha, empresa);
   const sp = document.getElementById('setupPage');
   if (sp) sp.style.display = 'none';
@@ -1817,8 +1820,8 @@ function seedDados(saEmail, saSenha, empresaNome) {
   const slug  = empresaNome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
   const tid   = uid();
   DATA.tenants.push({id:tid,nome:empresaNome,slug,data_expiracao:new Date(Date.now()+365*86400000).toISOString(),ativo:true,created_at:new Date().toISOString()});
-  DATA.users.push({id:uid(),email:saEmail,nome:'Administrador GBR',role:'superadmin',tenant_id:null,password:saSenha,must_change_password:false,ativo:true,created_at:new Date().toISOString()});
-  DATA.users.push({id:uid(),email:'owner@'+slug+'.com',nome:'Owner '+empresaNome,role:'owner',tenant_id:tid,password:saSenha,must_change_password:true,ativo:true,created_at:new Date().toISOString()});
+  DATA.users.push({id:uid(),email:saEmail.toLowerCase(),nome:'Administrador GBR',role:'superadmin',tenant_id:null,password:saSenha,must_change_password:false,ativo:true,created_at:new Date().toISOString()});
+  DATA.users.push({id:uid(),email:('owner@'+slug+'.com').toLowerCase(),nome:'Owner '+empresaNome,role:'owner',tenant_id:tid,password:saSenha,must_change_password:true,ativo:true,created_at:new Date().toISOString()});
   DATA.clientes=[
     {id:uid(),tenant_id:tid,nome_completo:'Rafael Mendes',telefone:'(11) 98765-4321',email:'rafael@email.com',cpf_cnpj:'123.456.789-00',data_nascimento:'1990-05-15',pontos_fidelidade:520,endereco:{cep:'01310-100',logradouro:'Av. Paulista',numero:'1000',bairro:'Bela Vista',cidade:'São Paulo',uf:'SP'},ativo:true,created_at:new Date().toISOString()},
     {id:uid(),tenant_id:tid,nome_completo:'Camila Torres',telefone:'(11) 91234-5678',email:'camila@email.com',cpf_cnpj:'987.654.321-00',data_nascimento:'1995-09-20',pontos_fidelidade:185,endereco:{cep:'04038-000',logradouro:'R. Domingos de Morais',numero:'200',bairro:'Vila Mariana',cidade:'São Paulo',uf:'SP'},ativo:true,created_at:new Date().toISOString()},
@@ -1864,7 +1867,7 @@ function fazerLogin(){
     const _secs=Math.ceil((_loginAttempts[email].lockedUntil-_now)/1000);
     showLoginMsg('Muitas tentativas. Aguarde '+_secs+'s','erro');return;
   }
-  const user=DATA.users.find(u=>u.email===email&&u.password===senha&&u.ativo);
+  const user=DATA.users.find(u=>u.email.toLowerCase()===email&&u.password===senha&&u.ativo);
   if(!user){
     _loginAttempts[email].count++;
     if(_loginAttempts[email].count>=5){_loginAttempts[email].lockedUntil=_now+60000;_loginAttempts[email].count=0;}
@@ -1878,6 +1881,21 @@ function fazerLogin(){
   }
   if(user.must_change_password){currentUser=user;document.getElementById('loginPage').style.display='none';document.getElementById('trocaSenhaPage').style.display='flex';return;}
   loginSucesso(user);
+}
+
+function mostrarCredenciais(){
+  // Show stored users for recovery (only name + role, NOT password)
+  if(!DATA.users||DATA.users.length===0){
+    alert('Nenhuma conta cadastrada. O sistema irá reiniciar o cadastro inicial.');
+    localStorage.clear();location.reload();return;
+  }
+  const lista=DATA.users.filter(u=>u.ativo).map(u=>'• '+u.nome+' ('+u.role+') — '+u.email).join('\n');
+  const resetar=confirm('Contas cadastradas:\n\n'+lista+'\n\nSe não consegue acessar, deseja RESETAR o sistema e recadastrar?\n\n⚠ ISSO APAGARÁ TODOS OS DADOS.');
+  if(resetar){
+    const conf=prompt('Digite RESETAR para confirmar (ação irreversível):');
+    if(conf==='RESETAR'){localStorage.clear();location.reload();}
+    else{alert('Reset cancelado.');}
+  }
 }
 
 function trocarSenha(){
