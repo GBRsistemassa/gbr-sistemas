@@ -3579,7 +3579,7 @@ function renderNPSSection(){
     '<div class="stat-card purple"><div class="stat-label">Promotores</div><div class="stat-value">'+promotores+'</div></div>'+
   '</div>'+
   '<div class="table-wrap"><table><thead><tr><th>Data</th><th>Cliente</th><th>Nota</th><th>Comentário</th><th>Canal</th><th>Ação</th></tr></thead><tbody>'+
-  avals.slice(-10).reverse().map(a=>{const cli=DATA.clientes.find(c=>c.id===a.cliente_id);const stars='⭐'.repeat(Math.min(10,a.nota));const corNota=a.nota>=9?'var(--green)':a.nota>=7?'var(--accent)':a.nota>=5?'var(--orange)':'var(--red)';return'<tr><td class="td-mono">'+fmtDate(a.created_at)+'</td><td>'+(cli?.nome_completo||'-')+'</td><td><span style="color:'+corNota+';font-weight:700">'+a.nota+'/10</span> <span style="font-size:10px">'+stars+'</span></td><td style="color:var(--text2);font-size:12px">'+(a.comentario||'-')+'</td><td>'+(a.via_whatsapp?'<span class="badge badge-green">WhatsApp</span>':'<span class="badge badge-gray">Manual</span>')+'</td><td><button class="btn btn-success btn-xs" onclick="enviarNPSWhatsApp(''+a.cliente_id+'')">💬 Reenviar</button></td></tr>';}).join('')+
+  avals.slice(-10).reverse().map(a=>{const cli=DATA.clientes.find(c=>c.id===a.cliente_id);const stars='⭐'.repeat(Math.min(10,a.nota));const corNota=a.nota>=9?'var(--green)':a.nota>=7?'var(--accent)':a.nota>=5?'var(--orange)':'var(--red)';return'<tr><td class="td-mono">'+fmtDate(a.created_at)+'</td><td>'+(cli?.nome_completo||'-')+'</td><td><span style="color:'+corNota+';font-weight:700">'+a.nota+'/10</span> <span style="font-size:10px">'+stars+'</span></td><td style="color:var(--text2);font-size:12px">'+(a.comentario||'-')+'</td><td>'+(a.via_whatsapp?'<span class="badge badge-green">WhatsApp</span>':'<span class="badge badge-gray">Manual</span>')+'</td><td><button class="btn btn-success btn-xs" onclick="enviarNPSWhatsApp(this.dataset.id)" data-id="'+a.cliente_id+'">💬 Reenviar</button></td></tr>';}).join('')+
   '</tbody></table></div>';
 }
 function abrirEnvioNPSMassa(){
@@ -3761,8 +3761,7 @@ function setBNActive(page){
 }
 
 </script>
-</body>
-</html>
+
 <script>
 // ══════════════════════════════════════════════════════════
 // GBR SISTEMAS — MÓDULOS ADICIONAIS v3.5
@@ -4316,3 +4315,5 @@ document.addEventListener('DOMContentLoaded',()=>{
   setTimeout(()=>{if(currentTenant)carregarAparenciaTenant();},200);
 });
 </script>
+</body>
+</html>
