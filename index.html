@@ -555,7 +555,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
     <div class="form-group"><label>Seu Nome <span class="req">*</span></label><input type="text" id="setupNome" placeholder="Nome do responsável"></div>
     <div class="form-group"><label>WhatsApp <span class="req">*</span></label><input type="tel" id="setupWhatsapp" placeholder="(00) 00000-0000" oninput="maskTel(this)"></div>
     <div class="form-group"><label>E-mail <span class="req">*</span></label><input type="email" id="setupEmail" placeholder="seu@email.com"></div>
-    <button class="btn btn-primary btn-lg" onclick="enviarSolicitacaoAcesso()" style="margin-top:8px">Solicitar Demonstração</button>
+    <button class="btn btn-primary btn-lg" id="btnSolicitarAcesso" onclick="enviarSolicitacaoAcesso()" style="margin-top:8px">Solicitar Demonstração</button>
     <div style="margin-top:16px;text-align:center;font-size:12px;color:var(--text2)">
       ⏱ Retorno em até <strong style="color:var(--accent)">48 horas</strong> por WhatsApp ou e-mail.<br>
       <span style="font-size:11px;color:var(--text3)">Já tem acesso? <a href="#" onclick="mostrarLogin()" style="color:var(--accent)">Fazer login</a></span>
@@ -1324,6 +1324,9 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
         </div>
         <input type="hidden" id="agendClienteId">
         <div id="agendCliInfo" style="display:none;margin-top:6px" class="info-box success"></div>
+        <div id="agendCliNaoEncontrado" style="display:none;margin-top:6px">
+          <button class="btn btn-secondary btn-sm" onclick="cadastrarClienteRapido()" style="width:100%">➕ Cliente não encontrado — Cadastrar agora</button>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Serviço <span class="req">*</span></label><select id="agendServico" onchange="onServicoCh()"><option value="">— Selecione —</option></select></div>
@@ -1886,11 +1889,25 @@ async function _gbrLoginFirebase(email, senha) {
   // Login
   loginSucesso(fbUser);
 
+  // Registrar último acesso no Firebase para o console
+  try { _gbrFbDb.ref('tenants/'+tenantId+'/ultimoAcesso').set(new Date().toISOString()); } catch(e) {}
+
   // Personalizações CMS (estilo, CSS, JS, notificações, injeções)
   _gbrCarregarPersonalizacoes(tenantId, tenantData);
 
   // Monitoramento em tempo real de licença
   _gbrMonitorarLicenca(tenantId);
+
+  // Monitorar notificações enviadas pelo console
+  if(_gbrFbDb&&tenantId){
+    try{
+      _gbrFbDb.ref('notifications/'+tenantId).orderByChild('ts').limitToLast(10).on('child_added',function(snap){
+        var n=snap.val();if(!n||n.lida)return;
+        setTimeout(function(){toast('🔔 '+n.titulo+': '+n.mensagem,'success');},1000);
+        _gbrFbDb.ref('notifications/'+tenantId+'/'+snap.key+'/lida').set(true);
+      });
+    }catch(e){console.warn('[GBR] notif monitor:',e);}
+  }
 
   return true; // login tratado pelo Firebase
 }
@@ -2079,67 +2096,42 @@ function mostrarLogin() {
   if (sp) sp.style.display = 'none';
   if (lp) lp.style.display = 'flex';
 }
-
 function mostrarSolicitarAcesso() {
   const sp = document.getElementById('setupPage');
   const lp = document.getElementById('loginPage');
   if (lp) lp.style.display = 'none';
-  if (sp) sp.style.display = 'flex';
-  var msgEl = document.getElementById('setupMsg');
-  if (msgEl) { msgEl.style.display = 'none'; msgEl.textContent = ''; }
+  if (sp) { sp.style.display = 'flex'; const m=document.getElementById('setupMsg'); if(m){m.style.display='none';m.textContent='';} }
 }
-
-function mostrarSetupInicial() {
-  // Nunca exibir setup — redirecionar sempre para login
-  mostrarLogin();
-}
+function mostrarSetupInicial() { mostrarLogin(); }
 
 async function enviarSolicitacaoAcesso() {
-  var empresa = (document.getElementById('setupEmpresa')?.value || '').trim();
-  var nome    = (document.getElementById('setupNome')?.value    || '').trim();
-  var whats   = (document.getElementById('setupWhatsapp')?.value|| '').trim();
-  var email   = (document.getElementById('setupEmail')?.value   || '').trim().toLowerCase();
+  var empresa = (document.getElementById('setupEmpresa')?.value||'').trim();
+  var nome    = (document.getElementById('setupNome')?.value||'').trim();
+  var whats   = (document.getElementById('setupWhatsapp')?.value||'').trim();
+  var email   = (document.getElementById('setupEmail')?.value||'').trim().toLowerCase();
   var msgEl   = document.getElementById('setupMsg');
-  var showErr = function(m){ if(msgEl){msgEl.className='login-msg erro';msgEl.textContent=m;msgEl.style.display='block';} };
-  var showOk  = function(m){ if(msgEl){msgEl.className='login-msg info';msgEl.textContent=m;msgEl.style.display='block';} };
-
-  if (!empresa) { showErr('Informe o nome da empresa.'); return; }
-  if (!nome)    { showErr('Informe seu nome.'); return; }
-  if (!whats)   { showErr('Informe seu WhatsApp.'); return; }
-  if (!email || !email.includes('@')) { showErr('Informe um e-mail válido.'); return; }
-
-  var btn = document.querySelector('#setupPage .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
-
+  var btn     = document.getElementById('btnSolicitarAcesso');
+  var showErr = function(m){if(msgEl){msgEl.className='login-msg erro';msgEl.textContent=m;msgEl.style.display='block';}};
+  var showOk  = function(m){if(msgEl){msgEl.className='login-msg info';msgEl.textContent=m;msgEl.style.display='block';}};
+  if(!empresa){showErr('Informe o nome da empresa.');return;}
+  if(!nome){showErr('Informe seu nome.');return;}
+  if(!whats){showErr('Informe seu WhatsApp.');return;}
+  if(!email||!email.includes('@')){showErr('Informe um e-mail válido.');return;}
+  if(btn){btn.disabled=true;btn.textContent='Enviando...';}
   try {
-    if (_gbrFbDb) {
-      var id = Date.now().toString(36) + Math.random().toString(36).substr(2,5);
-      await _gbrFbDb.ref('solicitacoes/' + id).set({
-        empresa: empresa,
-        nome: nome,
-        whatsapp: whats,
-        email: email,
-        ts: Date.now(),
-        status: 'pendente',
-        origem: window.location.hostname
-      });
+    if(_gbrFbDb){
+      var id=Date.now().toString(36)+Math.random().toString(36).substr(2,5);
+      await _gbrFbDb.ref('solicitacoes/'+id).set({empresa,nome,whatsapp:whats,email,ts:Date.now(),status:'pendente',origem:window.location.hostname});
       showOk('✅ Solicitação enviada! Entraremos em contato em até 48h pelo WhatsApp ou e-mail.');
     } else {
-      var msg = encodeURIComponent('Olá! Quero solicitar acesso ao GBR Sistemas.\n\nEmpresa: ' + empresa + '\nResponsável: ' + nome + '\nWhatsApp: ' + whats + '\nE-mail: ' + email);
-      window.open('https://wa.me/55?text=' + msg, '_blank');
+      var msg=encodeURIComponent('Olá! Gostaria de solicitar acesso ao GBR Sistemas.\n\nEmpresa: '+empresa+'\nResponsável: '+nome+'\nWhatsApp: '+whats+'\nE-mail: '+email);
+      window.open('https://wa.me/55?text='+msg,'_blank');
       showOk('✅ Abrimos o WhatsApp com seus dados. Aguarde nosso retorno em até 48h.');
     }
-  } catch(e) {
-    showErr('Erro ao enviar. Tente novamente.');
-    console.warn('[GBR] solicitacao:', e);
-  }
-  if (btn) { btn.disabled = false; btn.textContent = 'Solicitar Demonstração'; }
+  } catch(e) { showErr('Erro ao enviar. Tente novamente.'); console.warn('[GBR] solicitacao:',e); }
+  if(btn){btn.disabled=false;btn.textContent='Solicitar Demonstração';}
 }
-
-function concluirSetup() {
-  // Desabilitado — acesso concedido somente pelo admin
-  mostrarLogin();
-}
+function concluirSetup(){ mostrarLogin(); }
 
 function seedDados(saEmail, saSenha, empresaNome) {
   saEmail     = saEmail     || localStorage.getItem('gbr_sa_email') || 'admin@gbrsistemas.com';
@@ -2279,7 +2271,7 @@ function loginSucesso(user){
   var navAdmin=document.getElementById('navItemAdmin');
   if(navAdmin) navAdmin.style.display=['owner','admin','superadmin'].includes(user.role)?'flex':'none';
   verificarCaixa();
-  try { carregarAparenciaTenant(); } catch(e) { console.warn('[GBR] aparência:', e); }
+  try{carregarAparenciaTenant();}catch(e){console.warn('[GBR] aparência:',e);}
   atualizarFidAlerts();
   try{_registrarSessao(user);}catch(e){console.warn('[GBR] sessao:',e);}
   showPage('dashboard');
@@ -2298,9 +2290,8 @@ function showMsg(id,msg,tipo){const el=document.getElementById(id);el.className=
 
 // ===== NAVEGAÇÃO =====
 function showPage(name){
-  if(name==='admin' && currentUser && !['owner','admin','superadmin'].includes(currentUser.role)){
-    toast('Acesso restrito ao Painel Administrativo','error');
-    return;
+  if(name==='admin'&&currentUser&&!['owner','admin','superadmin'].includes(currentUser.role)){
+    toast('Acesso restrito ao Painel Administrativo','error');return;
   }  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const pg=document.getElementById('pg-'+name);if(pg)pg.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
@@ -2492,8 +2483,14 @@ function renderAgendamentos(){
     const serv=DATA.servicos.find(s=>s.id===a.servico_id);
     const temChk=DATA.checklists.some(c=>c.agendamento_id===a.id);
     let acoes='';
-    if(a.status==='agendado')acoes='<button class="btn btn-success btn-xs" onclick="mudarStatus(\''+a.id+'\',\'em_andamento\')">▶ Iniciar</button><button class="btn btn-danger btn-xs" onclick="mudarStatus(\''+a.id+'\',\'cancelado\')">✕</button>';
-    else if(a.status==='em_andamento'){acoes='<button class="btn btn-primary btn-xs" onclick="mudarStatus(\''+a.id+'\',\'concluido\')">✓ Concluir</button>';if(!temChk)acoes+='<button class="btn btn-secondary btn-xs" onclick="abrirChkAgend(\''+a.id+'\')">📋 Checklist</button>';acoes+='<button class="btn btn-danger btn-xs" onclick="mudarStatus(\''+a.id+'\',\'cancelado\')">✕</button>';}
+    if(a.status==='agendado') acoes='<button class="btn btn-success btn-xs" onclick="mudarStatus(\''+a.id+'\',\'em_andamento\')">▶ Iniciar</button><button class="btn btn-danger btn-xs" onclick="mudarStatus(\''+a.id+'\',\'cancelado\')">✕ Cancelar</button>';
+    else if(a.status==='em_andamento'){
+      acoes='<button class="btn btn-ghost btn-xs" onclick="mudarStatus(\''+a.id+'\',\'agendado\')" title="Voltar para Agendado">↩ Voltar</button>';
+      if(!temChk) acoes+='<button class="btn btn-secondary btn-xs" onclick="abrirChkAgend(\''+a.id+'\')">📋 Checklist</button>';
+      acoes+='<button class="btn btn-primary btn-xs" onclick="concluirComChecklist(\''+a.id+'\')" title="'+(temChk?'Concluir serviço':'Checklist obrigatório antes de concluir')+'">'+(temChk?'✓ Concluir':'⚠ Concluir')+'</button>';
+      acoes+='<button class="btn btn-danger btn-xs" onclick="mudarStatus(\''+a.id+'\',\'cancelado\')">✕</button>';
+    }
+    else if(a.status==='concluido') acoes='<button class="btn btn-ghost btn-xs" onclick="mudarStatus(\''+a.id+'\',\'em_andamento\')" title="Reabrir serviço">↩ Reabrir</button>';
     return'<tr><td><div class="td-name">'+(cli?.nome_completo||'-')+'</div><div class="td-sub">'+(a.veiculo||'-')+' '+(a.placa||'')+' '+(a.cor_veiculo?'· '+a.cor_veiculo:'')+'</div></td><td>'+(serv?.nome||'-')+'</td><td class="td-mono">'+fmtDateTime(a.data_hora_inicio)+'</td><td>'+fmtDuracao(serv?.tempo_estimado_min||0)+'</td><td>'+(a.forma_pagamento?'<span class="badge badge-gray">'+{pix:'Pix',credito:'Crédito',debito:'Débito',dinheiro:'Dinheiro',cortesia:'Cortesia'}[a.forma_pagamento]+'</span>':'-')+'</td><td><strong>'+fmtMoney(a.valor_total)+'</strong></td><td><span class="badge '+statusBadge(a.status)+'">'+statusLabel(a.status)+'</span></td><td><div class="actions-row">'+acoes+'</div></td></tr>';
   }).join('');
 }
@@ -2540,6 +2537,14 @@ function mudarStatus(id,novoSt){
   if(novoSt==='agendado')_dispararWaAutomatico('confirmacao',DATA.agendamentos[idx]);
   logAuditoria('Status Agendamento','De "'+statusLabel(agAntes)+'" para "'+statusLabel(novoSt)+'" | '+cliNome(DATA.agendamentos[idx].cliente_id));
   salvarDados();renderAgendamentos();renderAgenda();renderDashboard();toast('Status: '+statusLabel(novoSt));
+}
+
+function concluirComChecklist(id){
+  const temChk=DATA.checklists.some(c=>c.agendamento_id===id);
+  if(!temChk){
+    if(!confirm('⚠ Checklist não preenchido!\n\nRecomendamos preencher o checklist para proteção jurídica.\n\nDeseja concluir mesmo assim?'))return;
+  }
+  mudarStatus(id,'concluido');
 }
 
 // MÓDULO 15: Preenche variáveis de template WhatsApp ─────
@@ -2615,13 +2620,25 @@ function abrirModalAgendamentoHora(h){abrirModalAgendamento();document.getElemen
 function autoCliente(){
   const q=document.getElementById('agendClienteBusca').value.toLowerCase();
   const drop=document.getElementById('agendCliDrop');
+  const btnNovo=document.getElementById('agendCliNaoEncontrado');
   document.getElementById('agendClienteId').value='';
   document.getElementById('agendCliInfo').style.display='none';
-  if(!q||q.length<2){drop.style.display='none';return;}
+  if(!q||q.length<2){drop.style.display='none';if(btnNovo)btnNovo.style.display='none';return;}
   const matches=DATA.clientes.filter(c=>c.tenant_id===currentTenant?.id&&c.ativo&&(c.nome_completo.toLowerCase().includes(q)||(c.telefone||'').includes(q)||(c.cpf_cnpj||'').includes(q))).slice(0,6);
-  if(!matches.length){drop.style.display='none';return;}
+  if(!matches.length){drop.style.display='none';if(btnNovo)btnNovo.style.display='block';return;}
+  if(btnNovo)btnNovo.style.display='none';
   drop.innerHTML=matches.map(c=>'<div class="autocomplete-item" onclick="selecionarCli(\''+c.id+'\')"><div>'+c.nome_completo+'</div><div class="sub">'+(c.telefone||'')+' · '+(c.cpf_cnpj||'')+'</div></div>').join('');
   drop.style.display='block';
+}
+
+function cadastrarClienteRapido(){
+  // Pré-preenche nome do campo de busca e abre modal de cliente
+  const nome=document.getElementById('agendClienteBusca').value.trim();
+  closeModal('modalAgendamento');
+  abrirModalCliente();
+  if(nome) setTimeout(function(){const el=document.getElementById('c_nome');if(el)el.value=nome;},100);
+  // Ao salvar cliente, retorna ao modal de agendamento
+  window._voltarAgendDepoisCliente=true;
 }
 
 function selecionarCli(id){
@@ -2629,6 +2646,8 @@ function selecionarCli(id){
   document.getElementById('agendClienteId').value=id;
   document.getElementById('agendClienteBusca').value=c.nome_completo;
   document.getElementById('agendCliDrop').style.display='none';
+  const btnNovo=document.getElementById('agendCliNaoEncontrado');
+  if(btnNovo)btnNovo.style.display='none';
   const info=document.getElementById('agendCliInfo');
   info.style.display='block';
   info.textContent='✓ '+c.nome_completo+' · '+(c.telefone||'')+' · ⭐ '+c.pontos_fidelidade+' pts';
@@ -2857,6 +2876,20 @@ function salvarCliente(){
   else DATA.clientes.push({id:uid(),tenant_id:currentTenant?.id,...dados,pontos_fidelidade:0,ativo:true,created_at:new Date().toISOString()});
   if(typeof logAuditoria==='function')logAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente',dados.nome_completo);
   salvarDados();closeModal('modalCliente');renderClientes();renderDashboard();toast('Cliente salvo!');
+  // Se veio do agendamento, retornar e preencher cliente
+  if(window._voltarAgendDepoisCliente){
+    window._voltarAgendDepoisCliente=false;
+    const novoC=DATA.clientes.find(c=>c.nome_completo===dados.nome_completo&&c.tenant_id===currentTenant?.id);
+    setTimeout(function(){
+      abrirModalAgendamento();
+      if(novoC){
+        document.getElementById('agendClienteBusca').value=novoC.nome_completo;
+        document.getElementById('agendClienteId').value=novoC.id;
+        const info=document.getElementById('agendCliInfo');
+        if(info){info.style.display='block';info.textContent='✓ '+novoC.nome_completo+' · '+(novoC.telefone||'');}
+      }
+    },200);
+  }
 }
 
 function excluirCliente(id){if(!confirm('Desativar este cliente?'))return;const i=DATA.clientes.findIndex(c=>c.id===id);if(i>=0){DATA.clientes[i].ativo=false;salvarDados();renderClientes();toast('Cliente desativado');}}
@@ -3048,8 +3081,15 @@ function renderFichaEditor(){
     html+='</tbody></table></div>';
   }
   html+='</div>';
-  html+='<div class="card"><div class="card-header"><div class="card-title">Outros Custos</div></div><div class="form-row-3"><div class="form-group"><label>Mão de obra (R$)</label><input type="number" value="'+(f.custo_mao_obra||0)+'" min="0" step="0.01" oninput="_fichaAtual.custo_mao_obra=+this.value;_recalcFichaSummary();salvarDados()"></div><div class="form-group"><label>Desgaste equipamentos (R$)</label><input type="number" value="'+(f.custo_desgaste||0)+'" min="0" step="0.01" oninput="_fichaAtual.custo_desgaste=+this.value;_recalcFichaSummary();salvarDados()"></div><div class="form-group"><label>Custo fixo rateado (R$)</label><input type="number" value="'+(f.custo_fixo||0)+'" min="0" step="0.01" oninput="_fichaAtual.custo_fixo=+this.value;_recalcFichaSummary();salvarDados()"></div></div></div>';
-  html+='<div class="card" id="fichaSummaryBlock" style="background:var(--bg3)"><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="color:var(--text2)">Custo de insumos</span><span class="mono" data-sum="ins">'+fmtMoney(custoIns)+'</span></div><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="color:var(--text2)">Mão de obra + desgaste + fixo</span><span class="mono" data-sum="outros">'+fmtMoney((f.custo_mao_obra||0)+(f.custo_desgaste||0)+(f.custo_fixo||0))+'</span></div><hr style="border:none;border-top:1px solid var(--border);margin:6px 0"><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;font-weight:600"><span>Custo total</span><span class="mono" data-sum="total">'+fmtMoney(custoTotal)+'</span></div><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:var(--text2)"><span>Valor sugerido (margem 40%)</span><span class="mono text-accent" data-sum="sug">'+fmtMoney(+sug)+'</span></div><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;font-weight:700;color:'+(lucro>=0?'var(--green)':'var(--red)')+'"><span>Lucro com preço atual</span><span class="mono" data-sum="lucro">'+fmtMoney(lucro)+'</span></div></div>';
+  // Custo fixo: % sobre o preço do serviço (rateado pela qtd de serviços/mês)
+  var custoFixoPct=f.custo_fixo_pct||0;
+  var custoFixoVal=(s.preco_base*(custoFixoPct/100));
+  html+='<div class="card"><div class="card-header"><div class="card-title">Outros Custos</div></div><div class="form-row-3"><div class="form-group"><label>Mão de obra (R$)</label><input type="number" value="'+(f.custo_mao_obra||0)+'" min="0" step="0.01" oninput="_fichaAtual.custo_mao_obra=+this.value;_recalcFichaSummary();salvarDados()"></div><div class="form-group"><label>Desgaste equipamentos (R$)</label><input type="number" value="'+(f.custo_desgaste||0)+'" min="0" step="0.01" oninput="_fichaAtual.custo_desgaste=+this.value;_recalcFichaSummary();salvarDados()"></div><div class="form-group"><label>Custo fixo (% sobre preço) <span style="font-size:10px;color:var(--text2)">Ex: aluguel, luz ÷ serviços/mês</span></label><div style="display:flex;align-items:center;gap:6px"><input type="number" id="fichaFixoPct" value="'+custoFixoPct+'" min="0" max="100" step="0.1" style="flex:1" oninput="_fichaAtual.custo_fixo_pct=+this.value;_fichaAtual.custo_fixo=(_servAtual.preco_base*(+this.value/100));_recalcFichaSummary();salvarDados()"><span style="font-size:12px;color:var(--text2);white-space:nowrap">% = '+fmtMoney(custoFixoVal)+'</span></div><div style="font-size:10px;color:var(--text3);margin-top:3px">Dica: some todos os custos fixos ÷ nº de serviços feitos por mês = % por serviço</div></div></div></div>';
+  var custoTotalComFixo=custoIns+(f.custo_mao_obra||0)+(f.custo_desgaste||0)+custoFixoVal;
+  var lucroFinal=s.preco_base-custoTotalComFixo;
+  var margFinal=s.preco_base>0?((lucroFinal/s.preco_base)*100).toFixed(1):0;
+  var sugFinal=custoTotalComFixo>0?(custoTotalComFixo/0.6).toFixed(2):s.preco_base;
+  html+='<div class="card" id="fichaSummaryBlock" style="background:var(--bg3)"><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="color:var(--text2)">Custo de insumos</span><span class="mono" data-sum="ins">'+fmtMoney(custoIns)+'</span></div><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="color:var(--text2)">Mão de obra + desgaste</span><span class="mono" data-sum="outros">'+fmtMoney((f.custo_mao_obra||0)+(f.custo_desgaste||0))+'</span></div><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="color:var(--text2)">Custo fixo rateado ('+custoFixoPct+'%)</span><span class="mono" data-sum="fixo">'+fmtMoney(custoFixoVal)+'</span></div><hr style="border:none;border-top:1px solid var(--border);margin:6px 0"><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;font-weight:600"><span>Custo total</span><span class="mono" data-sum="total">'+fmtMoney(custoTotalComFixo)+'</span></div><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:var(--text2)"><span>Valor sugerido (margem 40%)</span><span class="mono text-accent" data-sum="sug">'+fmtMoney(+sugFinal)+'</span></div><div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;font-weight:700;color:'+(lucroFinal>=0?'var(--green)':'var(--red)')+'"><span>Lucro com preço atual (margem '+margFinal+'%)</span><span class="mono" data-sum="lucro">'+fmtMoney(lucroFinal)+'</span></div></div>';
   document.getElementById('fichaEditor').innerHTML=html;
   f.custo_insumos=custoIns;salvarDados();
 }
@@ -3130,7 +3170,7 @@ function renderFidelidade(){
   const regras=DATA.regras_fidelidade.filter(r=>r.tenant_id===currentTenant.id);
   const el=document.getElementById('fidRegras');
   if(!regras.length){el.innerHTML='<div class="empty"><div class="empty-title">Nenhuma regra cadastrada</div></div>';}
-  else el.innerHTML=regras.map(r=>'<div class="fid-regra"><div class="fid-pts">'+r.pontos+'<div style="font-size:10px;color:var(--text2);font-weight:400">pts</div></div><div class="fid-info"><div class="fid-nome">'+r.nome+'</div><div class="fid-desc">'+(r.descricao||'')+'</div><div style="margin-top:4px"><span class="badge badge-gray">'+r.tipo+'</span> <span style="font-size:11px;color:var(--text2)">Valor: '+r.valor+'</span></div></div><div class="actions-row"><button class="btn btn-danger btn-xs" onclick="excluirRegra(\''+r.id+'\')">✕</button></div></div>').join('');
+  else el.innerHTML=regras.map(r=>'<div class="fid-regra"><div class="fid-pts">'+r.pontos+'<div style="font-size:10px;color:var(--text2);font-weight:400">pts</div></div><div class="fid-info"><div class="fid-nome">'+r.nome+'</div><div class="fid-desc">'+(r.descricao||'')+'</div><div style="margin-top:4px"><span class="badge badge-gray">'+r.tipo+'</span> <span style="font-size:11px;color:var(--text2)">Valor: '+r.valor+'</span></div></div><div class="actions-row"><button class="btn btn-secondary btn-xs" onclick="editarRegra(\''+r.id+'\')">✏</button><button class="btn btn-danger btn-xs" onclick="excluirRegra(\''+r.id+'\')">✕</button></div></div>').join('');
 
   // Clientes prontos para resgate
   const prontos=DATA.clientes.filter(c=>c.tenant_id===currentTenant.id&&c.ativo&&regras.some(r=>c.pontos_fidelidade>=r.pontos)).sort((a,b)=>b.pontos_fidelidade-a.pontos_fidelidade);
@@ -3152,13 +3192,20 @@ function renderFidelidade(){
   }).join('');
 }
 
-function abrirModalRegra(){
-  document.getElementById('regraId').value='';
-  document.getElementById('regraModalTitle').textContent='Nova Regra de Fidelidade';
-  ['r_nome','r_desc','r_pontos','r_valor'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('r_tipo').value='desconto';
+function abrirModalRegra(editId){
+  const id=editId||'';
+  document.getElementById('regraId').value=id;
+  document.getElementById('regraModalTitle').textContent=id?'Editar Regra de Fidelidade':'Nova Regra de Fidelidade';
+  if(id){
+    const r=DATA.regras_fidelidade.find(x=>x.id===id);
+    if(r){document.getElementById('r_nome').value=r.nome||'';document.getElementById('r_desc').value=r.descricao||'';document.getElementById('r_pontos').value=r.pontos||'';document.getElementById('r_tipo').value=r.tipo||'desconto';document.getElementById('r_valor').value=r.valor||'';}
+  } else {
+    ['r_nome','r_desc','r_pontos','r_valor'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('r_tipo').value='desconto';
+  }
   openModal('modalRegra');
 }
+function editarRegra(id){abrirModalRegra(id);}
 
 function salvarRegra(){
   const nome=document.getElementById('r_nome').value.trim();
@@ -3218,7 +3265,7 @@ function renderCaixa(){
   const saidas=movs.filter(m=>m.tipo==='saida').reduce((s,m)=>s+m.valor,0);
   const saldo=(currentCaixa.saldo_inicial||0)+entradas-saidas;
   el.innerHTML='<div class="caixa-hero"><div class="caixa-hero-icon">💵</div><div><div style="font-size:16px;font-weight:600">Caixa Aberto</div><div style="font-size:12px;color:var(--text2)">Desde '+fmtDateTime(currentCaixa.aberto_em)+'</div></div><div style="margin-left:auto;text-align:right"><div class="saldo-label">Saldo Atual</div><div class="saldo-value">'+fmtMoney(saldo)+'</div></div></div>';
-  el.innerHTML+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px"><button class="btn btn-success" onclick="abrirMovCaixa(\'entrada\')">+ Entrada</button><button class="btn btn-danger" onclick="abrirMovCaixa(\'saida\')">- Saída</button><button class="btn btn-secondary" onclick="abrirMovCaixa(\'sangria\')">⚠ Sangria</button><button class="btn btn-secondary" style="margin-left:auto" onclick="abrirModalFecharCaixa()">🔒 Fechar Caixa</button></div>';
+  el.innerHTML+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px"><button class="btn btn-success" onclick="abrirMovCaixa(\'entrada\')">+ Entrada</button><button class="btn btn-danger" onclick="abrirMovCaixa(\'saida\')">− Saída</button><button class="btn btn-secondary" style="margin-left:auto" onclick="abrirModalFecharCaixa()">🔒 Fechar Caixa</button></div>';
   // Resumo por forma de pagamento
   const porPag={};movs.filter(m=>m.tipo==='entrada').forEach(m=>{const k=m.forma_pagamento||'outros';porPag[k]=(porPag[k]||0)+m.valor;});
   const pagLabels={pix:'Pix',credito:'Crédito',debito:'Débito',dinheiro:'Dinheiro',cortesia:'Cortesia',outros:'Outros'};
@@ -3287,7 +3334,15 @@ function fecharCaixa(){
   const esperado=(currentCaixa.saldo_inicial||0)+entradas-saidas;
   const i=DATA.caixas.findIndex(c=>c.id===currentCaixa.id);
   if(i>=0){DATA.caixas[i].status='fechado';DATA.caixas[i].fechado_em=new Date().toISOString();DATA.caixas[i].total_esperado=esperado;DATA.caixas[i].total_real=real;DATA.caixas[i].observacao=document.getElementById('fcObs').value;}
-  currentCaixa=null;salvarDados();closeModal('modalFecharCaixa');renderCaixa();atualizarFidAlerts();toast('Caixa fechado com sucesso!');
+  // Integrar com Financeiro: lançar fechamento como receita do dia
+  if(!DATA.movimentacoes_fin) DATA.movimentacoes_fin=[];
+  const hoje=new Date().toISOString().slice(0,10);
+  DATA.movimentacoes_fin.push({
+    id:uid(), tenant_id:currentTenant?.id, tipo:'receita',
+    categoria:'Fechamento de Caixa', descricao:'Caixa fechado — '+new Date().toLocaleDateString('pt-BR'),
+    valor:real, data:hoje, forma_pagamento:'misto', created_at:new Date().toISOString()
+  });
+  currentCaixa=null;salvarDados();closeModal('modalFecharCaixa');renderCaixa();atualizarFidAlerts();toast('Caixa fechado e lançado no financeiro!');
 }
 
 // Movimentação manual
@@ -3452,8 +3507,58 @@ function salvarChk(st){
 
 function verChk(id){
   const c=DATA.checklists.find(x=>x.id===id);if(!c)return;
+  const ag=DATA.agendamentos.find(a=>a.id===c.agendamento_id);
+  const cli=DATA.clientes.find(x=>x.id===ag?.cliente_id);
+  const statusLabel={ok:'✅ OK',avariado:'⚠️ Com Avaria',pendente:'⬜ Pendente'};
+  let html='<div style="max-height:80vh;overflow-y:auto;padding:4px">';
+  html+='<div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:14px">';
+  html+='<div style="font-size:13px;font-weight:600;margin-bottom:6px">📋 Checklist — '+( ag?.veiculo||'Veículo')+(ag?.placa?' ('+ag.placa+')':'')+'</div>';
+  html+='<div style="font-size:11px;color:var(--text2)">Cliente: '+(cli?.nome_completo||'—')+' · Data: '+new Date(c.created_at).toLocaleDateString('pt-BR')+' '+new Date(c.created_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})+'</div>';
+  html+='</div>';
+  html+='<div style="margin-bottom:14px">';
+  c.itens.forEach(function(it){
+    const cor=it.status==='ok'?'var(--green)':it.status==='avariado'?'var(--red)':'var(--text3)';
+    html+='<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px"><span>'+it.descricao+'</span><span style="color:'+cor+';font-weight:600">'+(statusLabel[it.status]||it.status)+'</span></div>';
+  });
+  html+='</div>';
+  if(c.fotos&&c.fotos.length){
+    html+='<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">📷 Fotos ('+c.fotos.length+')</div>';
+    html+='<div style="display:flex;flex-wrap:wrap;gap:8px">';
+    c.fotos.forEach(function(f){html+='<img src="'+f+'" style="width:100px;height:75px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer" onclick="window.open(this.src,\'_blank\')">';});
+    html+='</div></div>';
+  }
+  if(c.assinatura){
+    html+='<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">✍️ Assinatura do Cliente</div>';
+    html+='<img src="'+c.assinatura+'" style="max-width:100%;border:1px solid var(--border);border-radius:6px;background:#fff">';
+    html+='</div>';
+  }
   const ok=c.itens.filter(i=>i.status==='ok').length;
-  toast('Checklist: '+ok+'/'+c.itens.length+' itens OK · '+( c.fotos?.length||0)+' fotos · Assinatura: '+(c.assinatura?'Sim':'Não'),'success');
+  const avariados=c.itens.filter(i=>i.status==='avariado').length;
+  html+='<div style="background:var(--bg3);border-radius:8px;padding:10px;font-size:12px;margin-top:8px">';
+  html+='<strong>Resumo:</strong> '+ok+' OK · '+avariados+' com avaria · '+(c.assinatura?'✅ Assinado':'⚠️ Sem assinatura')+'</div>';
+  html+='</div>';
+  // Modal genérico
+  var m=document.getElementById('_modalChkView');
+  if(!m){m=document.createElement('div');m.id='_modalChkView';m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px';m.onclick=function(e){if(e.target===m)m.remove();};document.body.appendChild(m);}
+  m.innerHTML='<div style="background:var(--bg2);border-radius:12px;width:100%;max-width:540px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column"><div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700">Ficha de Vistoria</span><button onclick="document.getElementById(\'_modalChkView\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">×</button></div><div style="overflow-y:auto;padding:16px">'+html+'</div><div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px"><button class="btn btn-secondary btn-sm" onclick="imprimirChk(\''+id+'\')">🖨️ Imprimir</button><button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'_modalChkView\').remove()">Fechar</button></div></div>';
+  m.style.display='flex';
+}
+
+function imprimirChk(id){
+  const c=DATA.checklists.find(x=>x.id===id);if(!c)return;
+  const ag=DATA.agendamentos.find(a=>a.id===c.agendamento_id);
+  const cli=DATA.clientes.find(x=>x.id===ag?.cliente_id);
+  const win=window.open('','_blank');
+  win.document.write('<html><head><title>Checklist</title><style>body{font-family:sans-serif;padding:20px;max-width:600px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px;font-size:12px}img{max-width:120px;margin:4px}</style></head><body>');
+  win.document.write('<h3>GBR Sistemas — Ficha de Vistoria</h3>');
+  win.document.write('<p><b>Cliente:</b> '+(cli?.nome_completo||'—')+' | <b>Veículo:</b> '+(ag?.veiculo||'—')+' '+(ag?.placa||'')+'</p>');
+  win.document.write('<p><b>Data:</b> '+new Date(c.created_at).toLocaleString('pt-BR')+'</p>');
+  win.document.write('<table><tr><th>Item</th><th>Status</th></tr>');
+  c.itens.forEach(function(it){win.document.write('<tr><td>'+it.descricao+'</td><td>'+(it.status==='ok'?'✅ OK':it.status==='avariado'?'⚠️ Avariado':'—')+'</td></tr>');});
+  win.document.write('</table>');
+  if(c.assinatura)win.document.write('<h4>Assinatura</h4><img src="'+c.assinatura+'" style="max-width:200px;border:1px solid #ccc">');
+  win.document.write('</body></html>');
+  win.document.close();win.print();
 }
 
 // ===== CONFIG =====
@@ -3677,7 +3782,7 @@ function renderAlertasInteligentes(){
     if(agsCliente.length>0){
       const ultimo=agsCliente.sort((a,b)=>new Date(b.data_hora_inicio)-new Date(a.data_hora_inicio))[0];
       const diff=Math.floor((hoje-new Date(ultimo.data_hora_inicio))/(1000*60*60*24));
-      if(diff>=90)alertas.push({cor:'var(--orange)',ico:'⏰',titulo:'Cliente inativo há '+diff+' dias: '+cl.nome_completo,desc:'Último serviço: '+fmtDate(ultimo.data_hora_inicio),cta:'Reativar',fn:()=>showPage('whatsapp')});
+      if(diff>=30)alertas.push({cor:'var(--orange)',ico:'⏰',titulo:'Cliente sem visita há '+diff+' dias: '+cl.nome_completo,desc:'Último serviço: '+fmtDate(ultimo.data_hora_inicio),cta:'Reativar',fn:()=>showPage('whatsapp')});
     }
   });
   const criticos=DATA.produtos.filter(p=>p.tenant_id===currentTenant.id&&p.ativo&&p.quantidade_atual<=p.quantidade_minima);
@@ -4185,9 +4290,23 @@ function salvarTicket(){
   if(!titulo||!desc){toast('Preencha título e descrição','error');return;}
   const todos=DATA.tickets||[];
   const novoNum=todos.length?Math.max(...todos.map(t=>t.numero||0))+1:1001;
-  const dados={titulo,descricao:desc,prioridade:document.getElementById('tk_prio').value,status:document.getElementById('tk_status').value,modulo:document.getElementById('tk_modulo').value||null,usuario:currentUser?.nome,tenant_id:currentTenant?.id};
-  if(id){const i=DATA.tickets.findIndex(t=>t.id===id);if(i>=0){logAuditoria('Editou Ticket','#'+DATA.tickets[i].numero+' → Status: '+dados.status);Object.assign(DATA.tickets[i],dados);}}
-  else{DATA.tickets.push({id:uid(),numero:novoNum,...dados,created_at:new Date().toISOString()});logAuditoria('Abriu Chamado','#'+novoNum+' — '+titulo);}
+  const tenantId=currentTenant?.id||'';
+  const dados={titulo,descricao:desc,prioridade:document.getElementById('tk_prio').value,status:document.getElementById('tk_status').value,modulo:document.getElementById('tk_modulo').value||null,usuario:currentUser?.nome,tenant_id:tenantId};
+  if(id){
+    const i=DATA.tickets.findIndex(t=>t.id===id);
+    if(i>=0){logAuditoria('Editou Ticket','#'+DATA.tickets[i].numero+' → Status: '+dados.status);Object.assign(DATA.tickets[i],dados);}
+    // Sincronizar edição no Firebase
+    if(_gbrFbDb&&tenantId) try{_gbrFbDb.ref('tickets/'+tenantId+'/'+id).update(dados);}catch(e){}
+  } else {
+    const novoId=uid();
+    const novoTicket={id:novoId,numero:novoNum,...dados,created_at:new Date().toISOString()};
+    DATA.tickets.push(novoTicket);
+    logAuditoria('Abriu Chamado','#'+novoNum+' — '+titulo);
+    // Enviar para Firebase para o console ver
+    if(_gbrFbDb&&tenantId){
+      try{_gbrFbDb.ref('tickets/'+tenantId+'/'+novoId).set(novoTicket);}catch(e){}
+    }
+  }
   salvarDados();closeModal('modalTicket');renderTickets();toast('Chamado salvo!');
 }
 function excluirTicket(id){if(!confirm('Excluir este chamado?'))return;const t=DATA.tickets.find(x=>x.id===id);logAuditoria('Excluiu Ticket','#'+t?.numero+' — '+t?.titulo);DATA.tickets=DATA.tickets.filter(x=>x.id!==id);salvarDados();renderTickets();toast('Chamado excluído');}
