@@ -1726,10 +1726,15 @@ function _gbrCarregarPersonalizacoes(tenantId, tenantData) {
   if (stl.ac)  r.style.setProperty('--accent',  stl.ac);
   if (stl.ac2) r.style.setProperty('--accent2', stl.ac2);
   if (stl.bg)  r.style.setProperty('--bg',      stl.bg);
+  if (stl.text) r.style.setProperty('--text',   stl.text);
   if (stl.name) {
     var lb = document.querySelector('.logo-name');
     if (lb) lb.textContent = stl.name;
     document.title = stl.name;
+  }
+  if (stl.logo) {
+    var logoBox = document.querySelector('.logo-box');
+    if (logoBox) { logoBox.style.background='transparent'; logoBox.innerHTML='<img src="'+stl.logo+'" style="width:100%;height:100%;object-fit:contain;border-radius:8px">'; }
   }
 
   // CSS customizado
@@ -1922,7 +1927,14 @@ window.addEventListener('message', function(evt) {
       if (d.ac)   r.style.setProperty('--accent',  d.ac);
       if (d.ac2)  r.style.setProperty('--accent2', d.ac2);
       if (d.bg)   r.style.setProperty('--bg',      d.bg);
-      if (d.name) { var lb=document.querySelector('.logo-name'); if(lb) lb.textContent=d.name; }
+      if (d.text) r.style.setProperty('--text',    d.text);
+      if (d.name) { var lb=document.querySelector('.logo-name'); if(lb) lb.textContent=d.name; document.title=d.name; }
+      if (d.logo) {
+        var logoImgs=document.querySelectorAll('.logo-box-img,.sidebar-logo-img');
+        logoImgs.forEach(function(img){img.src=d.logo;img.style.display='block';});
+        var logoBox=document.querySelector('.logo-box');
+        if(logoBox){logoBox.style.background='transparent';logoBox.innerHTML='<img src="'+d.logo+'" style="width:100%;height:100%;object-fit:contain;border-radius:8px">';}
+      }
       break;
     }
     case 'cms_css_preview': {
@@ -1936,6 +1948,37 @@ window.addEventListener('message', function(evt) {
       break;
     case 'cms_inject_preview':
       if (d.code) _gbrAplicarInjecao('preview-tmp', {pos: d.pos||'bottom', code: d.code, ativo: true});
+      break;
+    case 'cms_auto_login':
+      // Login automático via console sem precisar de senha
+      if (d.tenantId && d.tenantData) {
+        var td = d.tenantData;
+        var emailKey = (d.email||'preview').replace(/\./g,'_').replace(/@/g,'__');
+        var fbUser = {
+          id: d.tenantId+'__preview',
+          email: d.email || 'preview@gbr.admin',
+          nome: td.info?.responsavel || td.info?.nome || 'Preview Admin',
+          role: 'owner',
+          tenant_id: d.tenantId,
+          password: '__preview__',
+          must_change_password: false,
+          ativo: true,
+          _gbrFromFB: true,
+          _isPreview: true
+        };
+        var fbTenant = {
+          id: d.tenantId, nome: td.info?.nome||d.tenantId,
+          slug: d.tenantId, ativo: true,
+          data_expiracao: td.licenca?.expiracao || new Date(Date.now()+86400000).toISOString(),
+          config_empresa: td.info || {}
+        };
+        var tIdx = DATA.tenants.findIndex(function(t){ return t.id===d.tenantId; });
+        if(tIdx>=0) DATA.tenants[tIdx]=fbTenant; else DATA.tenants.push(fbTenant);
+        var uIdx = DATA.users.findIndex(function(u){ return u.id===fbUser.id; });
+        if(uIdx>=0) DATA.users[uIdx]=fbUser; else DATA.users.push(fbUser);
+        loginSucesso(fbUser);
+        if(td.style) _gbrCarregarPersonalizacoes(d.tenantId, td);
+      }
       break;
   }
 });
