@@ -543,19 +543,24 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
 </div>
 
 <!-- SETUP INICIAL (só aparece no primeiro acesso) -->
+<!-- SOLICITAR ACESSO -->
 <div id="setupPage" class="login-wrap" style="display:none">
   <div class="login-card" style="max-width:420px">
     <div class="login-logo">
       <div class="login-logo-icon">GBR</div>
-      <h2>Configuração Inicial</h2>
-      <p>Crie o administrador principal do sistema</p>
+      <h2>Solicitar Acesso</h2>
+      <p>Preencha seus dados e entraremos em contato em até 48h</p>
     </div>
     <div id="setupMsg" class="login-msg"></div>
     <div class="form-group"><label>Nome da Empresa / Estética <span class="req">*</span></label><input type="text" id="setupEmpresa" placeholder="Ex: Auto Premium Estética"></div>
-    <div class="form-group"><label>E-mail do Superadmin <span class="req">*</span></label><input type="email" id="setupEmail" placeholder="admin@suaempresa.com" autocomplete="off"></div>
-    <div class="form-group"><label>Senha <span class="req">*</span></label><input type="password" id="setupSenha" placeholder="Mínimo 8 caracteres" autocomplete="new-password"></div>
-    <div class="form-group"><label>Confirmar Senha <span class="req">*</span></label><input type="password" id="setupConfirma" placeholder="Repita a senha" autocomplete="new-password"></div>
-    <button class="btn btn-primary btn-lg" onclick="concluirSetup()" style="margin-top:8px">Criar Conta e Entrar</button>
+    <div class="form-group"><label>Seu Nome <span class="req">*</span></label><input type="text" id="setupNome" placeholder="Nome do responsável"></div>
+    <div class="form-group"><label>WhatsApp <span class="req">*</span></label><input type="tel" id="setupWhatsapp" placeholder="(00) 00000-0000" oninput="maskTel(this)"></div>
+    <div class="form-group"><label>E-mail <span class="req">*</span></label><input type="email" id="setupEmail" placeholder="seu@email.com"></div>
+    <button class="btn btn-primary btn-lg" onclick="enviarSolicitacaoAcesso()" style="margin-top:8px">Solicitar Demonstração</button>
+    <div style="margin-top:16px;text-align:center;font-size:12px;color:var(--text2)">
+      ⏱ Retorno em até <strong style="color:var(--accent)">48 horas</strong> por WhatsApp ou e-mail.<br>
+      <span style="font-size:11px;color:var(--text3)">Já tem acesso? <a href="#" onclick="mostrarLogin()" style="color:var(--accent)">Fazer login</a></span>
+    </div>
   </div>
 </div>
 
@@ -2068,41 +2073,64 @@ function salvarDados(){
 }
 
 function mostrarSetupInicial() {
+ function mostrarLogin() {
   const sp = document.getElementById('setupPage');
   const lp = document.getElementById('loginPage');
-  if (sp) sp.style.display = 'flex';
-  if (lp) lp.style.display = 'none';
-}
-
-function concluirSetup() {
-  const empresa = (document.getElementById('setupEmpresa')?.value || '').trim();
-  const email   = (document.getElementById('setupEmail')?.value || '').trim().toLowerCase();
-  const senha   = document.getElementById('setupSenha')?.value || '';
-  const conf    = document.getElementById('setupConfirma')?.value || '';
-  const msgEl   = document.getElementById('setupMsg');
-  const showErr = (m) => { if(msgEl){msgEl.className='login-msg erro';msgEl.textContent=m;msgEl.style.display='block';} };
-  if (!empresa) { showErr('Informe o nome da empresa.'); return; }
-  if (!email || !email.includes('@')) { showErr('Informe um e-mail válido.'); return; }
-  if (senha.length < 8) { showErr('A senha deve ter no mínimo 8 caracteres.'); return; }
-  if (senha !== conf) { showErr('As senhas não conferem.'); return; }
-  localStorage.setItem('gbr_sa_email', email.toLowerCase());
-  seedDados(email, senha, empresa);
-  const sp = document.getElementById('setupPage');
   if (sp) sp.style.display = 'none';
-  const user = DATA.users.find(u => u.email === email && u.ativo);
-  if (user) loginSucesso(user);
+  if (lp) lp.style.display = 'flex';
 }
 
-function seedDados(saEmail, saSenha, empresaNome) {
-  saEmail     = saEmail     || localStorage.getItem('gbr_sa_email') || 'admin@gbrsistemas.com';
-  saSenha     = saSenha     || CONFIG.genTempPwd();
-  empresaNome = empresaNome || 'Estética Auto Premium';
-  const slug  = empresaNome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-  const tid   = uid();
-  DATA.tenants.push({id:tid,nome:empresaNome,slug,data_expiracao:new Date(Date.now()+365*86400000).toISOString(),ativo:true,created_at:new Date().toISOString()});
-  DATA.users.push({id:uid(),email:saEmail.toLowerCase(),nome:'Administrador GBR',role:'superadmin',tenant_id:null,password:saSenha,must_change_password:false,ativo:true,created_at:new Date().toISOString()});
-  DATA.users.push({id:uid(),email:('owner@'+slug+'.com').toLowerCase(),nome:'Owner '+empresaNome,role:'owner',tenant_id:tid,password:saSenha,must_change_password:true,ativo:true,created_at:new Date().toISOString()});
-  DATA.clientes=[
+function mostrarSetupInicial() {
+  // Nunca mostrar setup — redirecionar direto para login
+  const sp = document.getElementById('setupPage');
+  const lp = document.getElementById('loginPage');
+  if (sp) sp.style.display = 'none';
+  if (lp) lp.style.display = 'flex';
+}
+
+async function enviarSolicitacaoAcesso() {
+  var empresa  = (document.getElementById('setupEmpresa')?.value || '').trim();
+  var nome     = (document.getElementById('setupNome')?.value    || '').trim();
+  var whats    = (document.getElementById('setupWhatsapp')?.value|| '').trim();
+  var email    = (document.getElementById('setupEmail')?.value   || '').trim().toLowerCase();
+  var msgEl    = document.getElementById('setupMsg');
+  var showErr  = function(m){ if(msgEl){msgEl.className='login-msg erro';msgEl.textContent=m;msgEl.style.display='block';} };
+  var showOk   = function(m){ if(msgEl){msgEl.className='login-msg info';msgEl.textContent=m;msgEl.style.display='block';} };
+
+  if (!empresa) { showErr('Informe o nome da empresa.'); return; }
+  if (!nome)    { showErr('Informe seu nome.'); return; }
+  if (!whats)   { showErr('Informe seu WhatsApp.'); return; }
+  if (!email || !email.includes('@')) { showErr('Informe um e-mail válido.'); return; }
+
+  var btn = document.querySelector('#setupPage .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+
+  try {
+    if (_gbrFbDb) {
+      var id = Date.now().toString(36) + Math.random().toString(36).substr(2,5);
+      await _gbrFbDb.ref('solicitacoes/' + id).set({
+        empresa: empresa,
+        nome: nome,
+        whatsapp: whats,
+        email: email,
+        ts: Date.now(),
+        status: 'pendente',
+        origem: window.location.hostname
+      });
+      showOk('✅ Solicitação enviada! Entraremos em contato em até 48h pelo WhatsApp ou e-mail.');
+    } else {
+      // Fallback: abre WhatsApp com os dados
+      var msg = encodeURIComponent('Olá! Quero solicitar acesso ao GBR Sistemas.\n\nEmpresa: ' + empresa + '\nResponsável: ' + nome + '\nE-mail: ' + email);
+      window.open('https://wa.me/55?text=' + msg, '_blank');
+      showOk('✅ Abrimos o WhatsApp com seus dados. Aguarde nosso retorno em até 48h.');
+    }
+  } catch(e) {
+    showErr('Erro ao enviar. Tente novamente ou entre em contato pelo WhatsApp.');
+    console.warn('[GBR] solicitacao:', e);
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Solicitar Demonstração'; }
+}
     {id:uid(),tenant_id:tid,nome_completo:'Rafael Mendes',telefone:'(11) 98765-4321',email:'rafael@email.com',cpf_cnpj:'123.456.789-00',data_nascimento:'1990-05-15',pontos_fidelidade:520,endereco:{cep:'01310-100',logradouro:'Av. Paulista',numero:'1000',bairro:'Bela Vista',cidade:'São Paulo',uf:'SP'},ativo:true,created_at:new Date().toISOString()},
     {id:uid(),tenant_id:tid,nome_completo:'Camila Torres',telefone:'(11) 91234-5678',email:'camila@email.com',cpf_cnpj:'987.654.321-00',data_nascimento:'1995-09-20',pontos_fidelidade:185,endereco:{cep:'04038-000',logradouro:'R. Domingos de Morais',numero:'200',bairro:'Vila Mariana',cidade:'São Paulo',uf:'SP'},ativo:true,created_at:new Date().toISOString()},
     {id:uid(),tenant_id:tid,nome_completo:'Bruno Alves',telefone:'(11) 97654-3210',email:'bruno@email.com',cpf_cnpj:'456.789.123-00',data_nascimento:'1988-12-01',pontos_fidelidade:0,endereco:null,ativo:true,created_at:new Date().toISOString()}
