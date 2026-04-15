@@ -628,7 +628,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
       <div class="nav-item" onclick="showPage('suporte')"><span class="nav-icon">🎫</span>Suporte<span class="nav-count" id="suporteCount" style="display:none">0</span></div>
       <div class="nav-label">Sistema</div>
       <div class="nav-item" onclick="showPage('config')"><span class="nav-icon">⚙</span>Configurações</div>
-      <div class="nav-item" onclick="showPage('admin')"><span class="nav-icon">🛡</span>Painel Admin</div>
+      <div class="nav-item" id="navItemAdmin" style="display:none" onclick="showPage('admin')"><span class="nav-icon">🛡</span>Painel Admin</div>
     </nav>
     <div class="sidebar-footer">
       <div class="user-row">
@@ -825,19 +825,13 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
           <button class="btn btn-primary" onclick="salvarConfigEmpresa()">Salvar Dados</button>
         </div>
         <div class="card">
-          <div class="card-title" style="margin-bottom:16px">💸 Regras de Desconto</div>
-          <div class="form-group"><label>Desconto máx. sem senha (%)</label><input type="number" id="cfgDescSenha" min="0" max="100" placeholder="10"></div>
-          <div class="form-group"><label>Desconto máx. com senha admin (%)</label><input type="number" id="cfgDescAdmin" min="0" max="100" placeholder="50"></div>
-          <div class="form-group"><label>Senha administrativa para desconto</label><input type="password" id="cfgSenhaAdmin" placeholder="Senha do owner" autocomplete="new-password"></div>
-          <button class="btn btn-primary" onclick="salvarRegraDesconto()">Salvar Regras</button>
-        </div>
-        <div class="card">
           <div class="card-title" style="margin-bottom:16px">🔌 Módulos Ativos</div>
           <div class="toggle-row"><input type="checkbox" id="modFidelidade" checked><label for="modFidelidade">Fidelidade</label></div>
           <div class="toggle-row"><input type="checkbox" id="modChecklist" checked><label for="modChecklist">Checklist</label></div>
           <div class="toggle-row"><input type="checkbox" id="modEstoque" checked><label for="modEstoque">Estoque</label></div>
           <div class="toggle-row"><input type="checkbox" id="modFicha" checked><label for="modFicha">Ficha Técnica</label></div>
           <div style="margin-top:12px"><button class="btn btn-secondary btn-sm" onclick="exportarDados()">📥 Exportar dados (JSON)</button></div>
+          <div style="margin-top:8px;font-size:11px;color:var(--text3)">⚙ Regras de desconto e acessos estão em <strong>Painel Admin</strong></div>
         </div>
       </div>
     </div>
@@ -2234,6 +2228,9 @@ function loginSucesso(user){
   document.getElementById('userRole').textContent={superadmin:'Superadmin',owner:'Owner',admin:'Admin',operador:'Operador'}[user.role]||user.role;
   document.getElementById('userAvatar').textContent=user.nome.charAt(0).toUpperCase();
   if(currentTenant){document.getElementById('tenantNome').textContent=currentTenant.nome;document.getElementById('tenantSub').textContent=currentTenant.slug;}
+  // Mostrar Painel Admin só para owner/admin/superadmin
+  var navAdmin=document.getElementById('navItemAdmin');
+  if(navAdmin) navAdmin.style.display=['owner','admin','superadmin'].includes(user.role)?'flex':'none';
   verificarCaixa();
   try { carregarAparenciaTenant(); } catch(e) { console.warn('[GBR] aparência:', e); }
   atualizarFidAlerts();
@@ -2255,8 +2252,11 @@ function showMsg(id,msg,tipo){const el=document.getElementById(id);el.className=
 
 // ===== NAVEGAÇÃO =====
 function showPage(name){
-  // Route guard
-
+  // Route guard — bloquear acesso ao admin para operadores
+  if(name==='admin' && currentUser && !['owner','admin','superadmin'].includes(currentUser.role)){
+    toast('Acesso restrito ao Painel Administrativo','error');
+    return;
+  }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const pg=document.getElementById('pg-'+name);if(pg)pg.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
