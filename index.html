@@ -612,10 +612,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
     </div>
     <nav class="nav" id="navMenu">
       <div class="nav-label">Principal</div>
-      <div class="nav-item active" onclick="showPage('dashboard')"><span class="nav-icon">🏠</span>Dashboard</div>
-      <div class="nav-item" onclick="showPage('agenda')"><span class="nav-icon">📅</span>Agenda Diária</div>
-      <div class="nav-item" onclick="showPage('agenda-semana')"><span class="nav-icon">🗓</span>Agenda Semanal</div>
-      <div class="nav-item" onclick="showPage('agendamentos')"><span class="nav-icon">📋</span>Agendamentos</div>
+      <div class="nav-item active" onclick="showPage('agendamentos')"><span class="nav-icon">📅</span>Agendamentos</div>
       <div class="nav-label">Cadastro</div>
       <div class="nav-item" onclick="showPage('clientes')"><span class="nav-icon">👥</span>Clientes</div>
       <div class="nav-item" onclick="showPage('servicos')"><span class="nav-icon">⚙</span>Serviços</div>
@@ -653,6 +650,19 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
       <div class="topbar-right">
         <div class="caixa-pill fechado" id="caixaPill" onclick="showPage('caixa')">● <span id="caixaPillTxt">Caixa Fechado</span></div>
         <span class="topbar-date" id="topbarDate"></span>
+        <!-- Sino de notificações -->
+        <div style="position:relative">
+          <button class="topbar-btn" onclick="toggleNotifPanel()" title="Notificações" id="btnNotifSino">🔔<span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;font-size:9px;font-weight:700;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center">0</span></button>
+          <div id="notifPanel" style="display:none;position:absolute;right:0;top:42px;width:320px;background:var(--bg2);border:1px solid var(--border2);border-radius:12px;box-shadow:var(--shadow);z-index:500;max-height:400px;overflow-y:auto">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+              <span style="font-weight:600;font-size:13px">🔔 Notificações</span>
+              <button onclick="marcarTodasLidas()" style="font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">Marcar tudo lido</button>
+            </div>
+            <div id="notifLista" style="padding:8px">
+              <div style="text-align:center;padding:20px;color:var(--text2);font-size:12px">Nenhuma notificação</div>
+            </div>
+          </div>
+        </div>
         <button class="topbar-btn" onclick="abrirBuscaGlobal()" title="Busca global (Ctrl+K)" style="gap:6px">🔍 <span style="font-size:10px;color:var(--text3)">Ctrl+K</span></button>
         <button class="topbar-btn" onclick="toggleAparencia()" title="Aparência">🎨</button>
       </div>
@@ -707,14 +717,27 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
         <div><div class="section-title">Agendamentos</div><div class="section-sub">Todos os agendamentos</div></div>
         <button class="btn btn-primary" onclick="abrirModalAgendamento()">+ Novo Agendamento</button>
       </div>
-      <div class="search-bar">
-        <div class="search-wrap"><span class="icon">🔍</span><input type="text" class="search-input" id="agendBusca" placeholder="Buscar cliente, veículo ou placa..." oninput="renderAgendamentos()"></div>
-        <select id="agendStatus" onchange="renderAgendamentos()" style="width:160px">
-          <option value="">Todos</option><option value="agendado">Agendado</option>
-          <option value="em_andamento">Em andamento</option><option value="concluido">Concluído</option><option value="cancelado">Cancelado</option>
-        </select>
+      <!-- Abas de visualização -->
+      <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0">
+        <button class="admin-tab active" id="agendTab-lista" onclick="setAgendTab('lista')">📋 Lista</button>
+        <button class="admin-tab" id="agendTab-diaria" onclick="setAgendTab('diaria')">📅 Agenda Diária</button>
+        <button class="admin-tab" id="agendTab-semana" onclick="setAgendTab('semana')">🗓 Agenda Semanal</button>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>Cliente / Veículo</th><th>Serviço</th><th>Data/Hora</th><th>Duração</th><th>Pagamento</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead><tbody id="agendTbody"></tbody></table></div>
+      <!-- Painel Lista -->
+      <div id="agendPanel-lista">
+        <div class="search-bar">
+          <div class="search-wrap"><span class="icon">🔍</span><input type="text" class="search-input" id="agendBusca" placeholder="Buscar cliente, veículo ou placa..." oninput="renderAgendamentos()"></div>
+          <select id="agendStatus" onchange="renderAgendamentos()" style="width:160px">
+            <option value="">Todos</option><option value="agendado">Agendado</option>
+            <option value="em_andamento">Em andamento</option><option value="concluido">Concluído</option><option value="cancelado">Cancelado</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Cliente / Veículo</th><th>Serviços</th><th>Data/Hora</th><th>Duração</th><th>Pagamento</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead><tbody id="agendTbody"></tbody></table></div>
+      </div>
+      <!-- Painel Agenda Diária (embutido do pg-agenda) -->
+      <div id="agendPanel-diaria" style="display:none"></div>
+      <!-- Painel Agenda Semanal (embutido do pg-agenda-semana) -->
+      <div id="agendPanel-semana" style="display:none"></div>
     </div>
 
     <!-- CLIENTES -->
@@ -830,15 +853,6 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
             <div class="info-box" style="font-size:11.5px;margin-top:4px">💡 Este é <strong>seu valor por KM</strong>. O cálculo será: distância (km) × seu valor/km × 2 (ida e volta).</div>
           </div>
           <button class="btn btn-primary" onclick="salvarConfigEmpresa()">Salvar Dados</button>
-        </div>
-        <div class="card">
-          <div class="card-title" style="margin-bottom:16px">🔌 Módulos Ativos</div>
-          <div class="toggle-row"><input type="checkbox" id="modFidelidade" checked><label for="modFidelidade">Fidelidade</label></div>
-          <div class="toggle-row"><input type="checkbox" id="modChecklist" checked><label for="modChecklist">Checklist</label></div>
-          <div class="toggle-row"><input type="checkbox" id="modEstoque" checked><label for="modEstoque">Estoque</label></div>
-          <div class="toggle-row"><input type="checkbox" id="modFicha" checked><label for="modFicha">Ficha Técnica</label></div>
-          <div style="margin-top:12px"><button class="btn btn-secondary btn-sm" onclick="exportarDados()">📥 Exportar dados (JSON)</button></div>
-          <div style="margin-top:8px;font-size:11px;color:var(--text3)">⚙ Regras de desconto e acessos disponíveis no <strong>Painel Admin</strong></div>
         </div>
       </div>
     </div>
@@ -1120,6 +1134,15 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
               </div>
               <div style="font-size:11px;color:var(--text2)">Cálculo: distância(km) × seu valor/km × 2 (ida e volta). O cliente verá o total calculado automaticamente.</div>
             </div>
+            <!-- VAGAS SIMULTÂNEAS -->
+            <div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.25);border-radius:var(--radius);padding:14px;margin:12px 0">
+              <div style="font-size:12px;font-weight:700;color:var(--blue);margin-bottom:10px">🅿 Vagas Simultâneas de Atendimento</div>
+              <div class="form-group">
+                <label>Quantas vagas (carros) pode atender ao mesmo tempo?</label>
+                <input type="number" id="adm_vagas" min="1" max="20" value="1" placeholder="Ex: 3">
+              </div>
+              <div style="font-size:11px;color:var(--text2)">O sistema bloqueará novos agendamentos quando todas as vagas estiverem ocupadas naquele horário.</div>
+            </div>
             <button class="btn btn-primary" onclick="salvarEmpresaAdminCompleto()">💾 Salvar Todos os Dados</button>
           </div>
           <div class="card">
@@ -1215,9 +1238,15 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
         <div class="admin-grid">
           <div class="card">
             <div class="card-title" style="margin-bottom:16px">🌐 Agenda Online</div>
-            <div class="switch-row"><div><div class="switch-label">Habilitar Agenda Online</div><div class="switch-sub">Gera link público de agendamento</div></div><label class="switch"><input type="checkbox" id="aoAtivo" checked><span class="switch-slider"></span></label></div>
+            <div class="switch-row"><div><div class="switch-label">Habilitar Agenda Online</div><div class="switch-sub">Gera link público de agendamento exclusivo</div></div><label class="switch"><input type="checkbox" id="aoAtivo" checked><span class="switch-slider"></span></label></div>
             <div style="margin-top:14px">
-              <label class="form-group"><div style="font-size:11.5px;font-weight:500;color:var(--text2);margin-bottom:5px">Link público</div><div style="display:flex;gap:8px"><input type="text" id="aoLink" readonly style="font-size:12px;font-family:'DM Mono',monospace"><button class="btn btn-secondary btn-sm" onclick="copiarLinkOnline()">Copiar</button></div></label>
+              <div style="font-size:11.5px;font-weight:500;color:var(--text2);margin-bottom:5px">Link único do cliente <span style="color:var(--text3);font-weight:400">(cada geração invalida o anterior)</span></div>
+              <div style="display:flex;gap:8px;margin-bottom:8px">
+                <input type="text" id="aoLink" readonly style="font-size:11px;font-family:'DM Mono',monospace;flex:1">
+                <button class="btn btn-secondary btn-sm" onclick="copiarLinkOnline()">📋 Copiar</button>
+              </div>
+              <button class="btn btn-primary btn-sm" style="width:100%" onclick="gerarNovoTokenOnline()">🔄 Gerar Novo Link</button>
+              <div style="font-size:10px;color:var(--text3);margin-top:6px">⚠ Ao gerar um novo link, o link anterior para de funcionar. Use para evitar confusões entre clientes de estéticas diferentes.</div>
             </div>
             <hr class="divider">
             <div style="font-size:13px;font-weight:600;margin-bottom:10px">Horários de Funcionamento</div>
@@ -1328,16 +1357,20 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
           <button class="btn btn-secondary btn-sm" onclick="cadastrarClienteRapido()" style="width:100%">➕ Cliente não encontrado — Cadastrar agora</button>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>Serviço <span class="req">*</span></label><select id="agendServico" onchange="onServicoCh()"><option value="">— Selecione —</option></select></div>
-        <div class="form-group"><label>Forma de pagamento</label>
-          <select id="agendPagamento">
-            <option value="">— Selecione —</option>
-            <option value="pix">💳 Pix</option><option value="credito">💳 Crédito</option>
-            <option value="debito">💳 Débito</option><option value="dinheiro">💵 Dinheiro</option>
-            <option value="cortesia">🎁 Cortesia</option>
-          </select>
-        </div>
+      <div class="form-group">
+        <label>Serviços <span class="req">*</span></label>
+        <div id="agendServicosLista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="addServicoAgend()" style="width:100%">+ Adicionar Serviço</button>
+        <!-- hidden para compatibilidade -->
+        <input type="hidden" id="agendServico">
+      </div>
+      <div class="form-group"><label>Forma de pagamento</label>
+        <select id="agendPagamento">
+          <option value="">— Selecione —</option>
+          <option value="pix">💳 Pix</option><option value="credito">💳 Crédito</option>
+          <option value="debito">💳 Débito</option><option value="dinheiro">💵 Dinheiro</option>
+          <option value="cortesia">🎁 Cortesia</option>
+        </select>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Data <span class="req">*</span></label><input type="date" id="agendData" onchange="checarConflito()"></div>
@@ -1621,10 +1654,8 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
     <div class="modal-body">
       <input type="hidden" id="ticketId">
       <div class="form-group"><label>Título <span class="req">*</span></label><input type="text" id="tk_titulo" placeholder="Descreva brevemente o problema"></div>
-      <div class="form-row">
-        <div class="form-group"><label>Prioridade</label><select id="tk_prio"><option value="baixa">🟢 Baixa</option><option value="media" selected>🟡 Média</option><option value="alta">🔴 Alta</option><option value="critica">🚨 Crítica</option></select></div>
-        <div class="form-group"><label>Status</label><select id="tk_status"><option value="aberto">Aberto</option><option value="em_andamento">Em Andamento</option><option value="resolvido">Resolvido</option></select></div>
-      </div>
+      <div class="form-group"><label>Prioridade</label><select id="tk_prio"><option value="baixa">🟢 Baixa</option><option value="media" selected>🟡 Média</option><option value="alta">🔴 Alta</option><option value="critica">🚨 Crítica</option></select></div>
+      <input type="hidden" id="tk_status" value="aberto">
       <div class="form-group"><label>Descrição <span class="req">*</span></label><textarea id="tk_desc" placeholder="Detalhe o problema, incluindo passos para reproduzir..." style="min-height:100px"></textarea></div>
       <div class="form-group"><label>Módulo afetado</label><select id="tk_modulo"><option value="">— Geral —</option><option>Agendamento</option><option>Caixa</option><option>Clientes</option><option>Checklist</option><option>Estoque</option><option>Fidelidade</option><option>Financeiro</option><option>Relatórios</option><option>WhatsApp</option><option>Outros</option></select></div>
     </div>
@@ -1909,6 +1940,9 @@ async function _gbrLoginFirebase(email, senha) {
       _gbrFbDb.ref('notifications/'+tenantId).orderByChild('ts').limitToLast(10).on('child_added',function(snap){
         var n=snap.val();if(!n||n.lida)return;
         setTimeout(function(){toast('🔔 '+n.titulo+': '+n.mensagem,'success');},1000);
+        // Adicionar ao cache e atualizar badge sem marcar como lida automaticamente
+        _notifCache.unshift({id:snap.key,...n});
+        atualizarBadgeNotif();
         _gbrFbDb.ref('notifications/'+tenantId+'/'+snap.key+'/lida').set(true);
       });
     }catch(e){console.warn('[GBR] notif monitor:',e);}
@@ -2320,6 +2354,90 @@ function loginSucesso(user){
   showPage('dashboard');
 }
 
+// ===== NOTIFICAÇÕES =====
+var _notifAberto = false;
+var _notifCache = [];
+
+function toggleNotifPanel(){
+  var panel = document.getElementById('notifPanel');
+  _notifAberto = !_notifAberto;
+  panel.style.display = _notifAberto ? 'block' : 'none';
+  if(_notifAberto) carregarNotificacoes();
+}
+
+// Fechar painel ao clicar fora
+document.addEventListener('click', function(e){
+  if(_notifAberto && !e.target.closest('#btnNotifSino') && !e.target.closest('#notifPanel')){
+    _notifAberto = false;
+    var p = document.getElementById('notifPanel');
+    if(p) p.style.display = 'none';
+  }
+});
+
+function carregarNotificacoes(){
+  var lista = document.getElementById('notifLista');
+  if(!_gbrFbDb || !currentTenant) {
+    lista.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px">Conecte-se para ver notificações</div>';
+    return;
+  }
+  _gbrFbDb.ref('notifications/'+currentTenant.id).orderByChild('ts').limitToLast(20).once('value', function(snap){
+    var notifs = [];
+    snap.forEach(function(child){ notifs.unshift({id:child.key, ...child.val()}); });
+    _notifCache = notifs;
+    renderNotifLista();
+    atualizarBadgeNotif();
+  });
+}
+
+function renderNotifLista(){
+  var lista = document.getElementById('notifLista');
+  if(!_notifCache.length){
+    lista.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px">Nenhuma notificação</div>';
+    return;
+  }
+  const tipoCor = {info:'var(--blue)',sucesso:'var(--green)',alerta:'var(--red)',aviso:'var(--accent)'};
+  lista.innerHTML = _notifCache.map(function(n){
+    const lida = n.lida === true;
+    return '<div style="padding:10px 12px;border-bottom:1px solid var(--border);background:'+(lida?'transparent':'rgba(59,130,246,.04)')+';border-radius:6px;margin-bottom:4px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+        +'<div style="flex:1">'
+          +'<div style="font-size:12px;font-weight:'+(lida?'400':'600')+';color:'+(tipoCor[n.tipo]||'var(--text)')+'">'+n.titulo+'</div>'
+          +'<div style="font-size:11px;color:var(--text2);margin-top:2px">'+n.mensagem+'</div>'
+          +'<div style="font-size:10px;color:var(--text3);margin-top:4px">'+new Date(n.ts||Date.now()).toLocaleString('pt-BR')+'</div>'
+        +'</div>'
+        +(!lida?'<button onclick="marcarLida(\''+n.id+'\')" style="font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;flex-shrink:0">✓ Lida</button>':'')
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+
+function marcarLida(notifId){
+  if(!_gbrFbDb||!currentTenant) return;
+  _gbrFbDb.ref('notifications/'+currentTenant.id+'/'+notifId+'/lida').set(true).then(function(){
+    var n = _notifCache.find(function(x){return x.id===notifId;});
+    if(n) n.lida = true;
+    renderNotifLista();
+    atualizarBadgeNotif();
+  });
+}
+
+function marcarTodasLidas(){
+  if(!_gbrFbDb||!currentTenant) return;
+  var updates = {};
+  _notifCache.forEach(function(n){ if(!n.lida) updates['notifications/'+currentTenant.id+'/'+n.id+'/lida']=true; });
+  if(Object.keys(updates).length) _gbrFbDb.ref().update(updates).then(function(){
+    _notifCache.forEach(function(n){n.lida=true;});
+    renderNotifLista();
+    atualizarBadgeNotif();
+  });
+}
+
+function atualizarBadgeNotif(){
+  var count = _notifCache.filter(function(n){return !n.lida;}).length;
+  var badge = document.getElementById('notifBadge');
+  if(badge){ badge.textContent=count; badge.style.display=count>0?'flex':'none'; }
+}
+
 function fazerLogout(){
   localStorage.removeItem('gbr_sessao');
   currentUser=null;currentTenant=null;currentCaixa=null;
@@ -2509,8 +2627,30 @@ function mudarDia(d){diaAgenda.setDate(diaAgenda.getDate()+d);renderAgenda();}
 function irHoje(){diaAgenda=new Date();renderAgenda();}
 
 // ===== AGENDAMENTOS =====
-function renderAgendamentos(){
-  const busca=(document.getElementById('agendBusca')?.value||'').toLowerCase();
+var _agendTabAtual='lista';
+function setAgendTab(tab){
+  _agendTabAtual=tab;
+  ['lista','diaria','semana'].forEach(function(t){
+    var btn=document.getElementById('agendTab-'+t);
+    var panel=document.getElementById('agendPanel-'+t);
+    if(btn) btn.classList.toggle('active',t===tab);
+    if(panel) panel.style.display=t===tab?'block':'none';
+  });
+  if(tab==='lista') renderAgendamentos();
+  else if(tab==='diaria'){
+    var p=document.getElementById('agendPanel-diaria');
+    var src=document.getElementById('pg-agenda');
+    if(p&&src) p.innerHTML=src.innerHTML;
+    renderAgenda();
+  } else if(tab==='semana'){
+    var p2=document.getElementById('agendPanel-semana');
+    var src2=document.getElementById('pg-agenda-semana');
+    if(p2&&src2) p2.innerHTML=src2.innerHTML;
+    renderAgendaSemana();
+  }
+}
+
+function renderAgendamentos(){\n  const busca=(document.getElementById('agendBusca')?.value||'').toLowerCase();
   const status=document.getElementById('agendStatus')?.value||'';
   const lista=DATA.agendamentos.filter(a=>{
     if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
@@ -2632,6 +2772,50 @@ function _dispararWaAutomatico(tipo,ag){
 }
 
 // Modal agendamento
+var _agendServicos = []; // lista de serviços do agendamento atual
+
+function addServicoAgend(servId){
+  const servs = DATA.servicos.filter(s=>currentTenant&&s.tenant_id===currentTenant.id&&s.ativo);
+  if(!servs.length){toast('Cadastre serviços primeiro','error');return;}
+  _agendServicos.push({id: servId||'', qty:1});
+  renderServicosAgend();
+  calcTotalAgend();
+}
+
+function renderServicosAgend(){
+  const servs = DATA.servicos.filter(s=>currentTenant&&s.tenant_id===currentTenant.id&&s.ativo);
+  const el = document.getElementById('agendServicosLista');
+  if(!el) return;
+  el.innerHTML = _agendServicos.map(function(item, idx){
+    return '<div style="display:flex;gap:6px;align-items:center">'
+      +'<select onchange="_agendServicos['+idx+'].id=this.value;calcTotalAgend();atualizarDurInfo();" style="flex:1;font-size:12px">'
+        +'<option value="">— Serviço —</option>'
+        +servs.map(s=>'<option value="'+s.id+'" '+(item.id===s.id?'selected':'')+'>'+s.nome+' · '+fmtDuracao(s.tempo_estimado_min)+' · '+fmtMoney(s.preco_base)+'</option>').join('')
+      +'</select>'
+      +'<button type="button" onclick="_agendServicos.splice('+idx+',1);renderServicosAgend();calcTotalAgend();" class="btn btn-danger btn-xs" style="flex-shrink:0">✕</button>'
+    +'</div>';
+  }).join('');
+  // atualizar hidden para compatibilidade
+  const first = _agendServicos.find(s=>s.id);
+  const hid = document.getElementById('agendServico');
+  if(hid && first) hid.value = first.id;
+}
+
+function atualizarDurInfo(){
+  const servs = _agendServicos.map(s=>DATA.servicos.find(x=>x.id===s.id)).filter(Boolean);
+  if(!servs.length){document.getElementById('agendDurInfo').style.display='none';return;}
+  const totalMin = servs.reduce((t,s)=>t+(s.tempo_estimado_min||0),0);
+  const data = document.getElementById('agendData').value;
+  const hora = document.getElementById('agendHora').value;
+  if(data&&hora){
+    const fim = new Date(data+'T'+hora);fim.setMinutes(fim.getMinutes()+totalMin);
+    const info = document.getElementById('agendDurInfo');
+    info.style.display='block';
+    info.textContent='⏱ Duração total: '+fmtDuracao(totalMin)+' — Término previsto: '+fmtTime(fim.toISOString());
+  }
+  checarConflito();
+}
+
 function abrirModalAgendamento(){
   document.getElementById('agendId').value='';
   document.getElementById('agendModalTitle').textContent='Novo Agendamento';
@@ -2651,8 +2835,9 @@ function abrirModalAgendamento(){
   document.getElementById('agendPagamento').value='';
   document.getElementById('agendLevaTraz').checked=false;
   document.getElementById('ltWrap').style.display='none';
-  const ss=document.getElementById('agendServico');
-  ss.innerHTML='<option value="">— Selecione —</option>'+DATA.servicos.filter(s=>currentTenant&&s.tenant_id===currentTenant.id&&s.ativo).map(s=>'<option value="'+s.id+'" data-v="'+s.preco_base+'" data-km="'+(s.valor_km||0)+'" data-lt="'+(s.leva_traz?1:0)+'">'+s.nome+' · '+fmtDuracao(s.tempo_estimado_min)+' · '+fmtMoney(s.preco_base)+'</option>').join('');
+  // Init multi-serviço
+  _agendServicos = [{id:'', qty:1}];
+  renderServicosAgend();
   calcTotalAgend();
   openModal('modalAgendamento');
 }
@@ -2805,16 +2990,12 @@ async function calcLevaTraz(){
 }
 
 function calcTotalAgend(){
-  const sid=document.getElementById('agendServico').value;
-  const vs=sid?+(DATA.servicos.find(s=>s.id===sid)?.preco_base||0):0;
+  // Somar todos os serviços selecionados
+  const vs=(_agendServicos||[]).reduce(function(t,item){
+    const s=DATA.servicos.find(x=>x.id===item.id);
+    return t+(s?s.preco_base:0);
+  },0);
   const desc=+(document.getElementById('agendDesconto').value)||0;
-  // Validate discount against configured rules
-  const _cfg2=DATA.configuracoes[currentTenant?.id]||{};
-  const _maxSemSenha=_cfg2.desc_sem_senha||100;
-  if(desc>_maxSemSenha){
-    const _senhaDesc=prompt('Desconto de '+desc+'% acima do limite ('+_maxSemSenha+'%). Informe a senha admin:');
-    if(_senhaDesc!==_cfg2.senha_admin){toast('Senha incorreta. Desconto não permitido.','error');return;}
-  }
   const ltInfo=document.getElementById('ltInfo');
   const vlt=document.getElementById('agendLevaTraz').checked&&ltInfo.dataset.valor?+ltInfo.dataset.valor:0;
   const vdesc=vs*(desc/100);
@@ -2829,33 +3010,32 @@ function calcTotalAgend(){
 function salvarAgendamento(){
   const id=document.getElementById('agendId').value;
   const cid=document.getElementById('agendClienteId').value;
-  const sid=document.getElementById('agendServico').value;
   const dt=document.getElementById('agendData').value;
   const hr=document.getElementById('agendHora').value;
   if(!cid){toast('Selecione um cliente','error');return;}
-  if(!sid){toast('Selecione um serviço','error');return;}
+  // Validar serviços
+  const servicosSel=(_agendServicos||[]).filter(s=>s.id);
+  if(!servicosSel.length){toast('Selecione pelo menos um serviço','error');return;}
   if(!dt||!hr){toast('Informe data e horário','error');return;}
-  const serv=DATA.servicos.find(s=>s.id===sid);
+  // Duração total = soma de todos os serviços
+  const servObjs=servicosSel.map(s=>DATA.servicos.find(x=>x.id===s.id)).filter(Boolean);
+  const totalMin=servObjs.reduce((t,s)=>t+(s.tempo_estimado_min||0),0);
   const di=new Date(dt+'T'+hr);
-  const df=new Date(di.getTime()+(serv?.tempo_estimado_min||60)*60000);
-  const exclId=id;
-  const conflito=DATA.agendamentos.some(a=>{
-    if(exclId&&a.id===exclId)return false;
+  const df=new Date(di.getTime()+(totalMin||60)*60000);
+  // Verificar vagas disponíveis
+  const cfg=DATA.configuracoes[currentTenant?.id]||{};
+  const vagasMax=cfg.vagas_simultaneas||1;
+  const agendNoHorario=DATA.agendamentos.filter(a=>{
+    if(id&&a.id===id)return false;
     if(!a.ativo||['cancelado','concluido'].includes(a.status))return false;
     if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
     const ai=new Date(a.data_hora_inicio),af=new Date(a.data_hora_fim);
     return ai<df&&af>di;
   });
-  if(conflito){toast('Conflito de horário! Escolha outro horário.','error');return;}
-  const desc=+(document.getElementById('agendDesconto').value)||0;
-  // Validate discount against configured rules
-  const _cfg2=DATA.configuracoes[currentTenant?.id]||{};
-  const _maxSemSenha=_cfg2.desc_sem_senha||100;
-  if(desc>_maxSemSenha){
-    const _senhaDesc=prompt('Desconto de '+desc+'% acima do limite ('+_maxSemSenha+'%). Informe a senha admin:');
-    if(_senhaDesc!==_cfg2.senha_admin){toast('Senha incorreta. Desconto não permitido.','error');return;}
+  if(agendNoHorario.length>=vagasMax){
+    toast('⚠ Sem vagas disponíveis neste horário! ('+vagasMax+' vaga(s) simultânea(s))','error');return;
   }
-  // Validar desconto contra regras
+  const desc=+(document.getElementById('agendDesconto').value)||0;
   const _cfg=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
   const _maxDesc=_cfg.desc_sem_senha||100;
   const _maxAdm=_cfg.desc_com_senha||100;
@@ -2864,11 +3044,25 @@ function salvarAgendamento(){
     const _inp=prompt('Desconto acima do limite. Digite a senha admin:');
     if(_inp!==_cfg.senha_admin){toast('Senha incorreta. Desconto não autorizado.','error');return;}
   }
-  const vs=serv?.preco_base||0;
+  const vs=servObjs.reduce((t,s)=>t+(s.preco_base||0),0);
   const ltInfo=document.getElementById('ltInfo');
   const vlt=document.getElementById('agendLevaTraz').checked&&ltInfo.dataset.valor?+ltInfo.dataset.valor:0;
   const total=Math.max(0,vs+vlt-vs*(desc/100));
-  const dados={cliente_id:cid,servico_id:sid,data_hora_inicio:di.toISOString(),data_hora_fim:df.toISOString(),veiculo:document.getElementById('agendVeiculo').value,placa:document.getElementById('agendPlaca').value,cor_veiculo:document.getElementById('agendCor').value,forma_pagamento:document.getElementById('agendPagamento').value,observacoes:document.getElementById('agendObs').value,leva_traz:document.getElementById('agendLevaTraz').checked,valor_total:total,desconto_pct:desc};
+  // servico_id = primeiro serviço (compatibilidade), servicos_ids = todos
+  const dados={
+    cliente_id:cid,
+    servico_id:servicosSel[0].id,
+    servicos_ids:servicosSel.map(s=>s.id),
+    data_hora_inicio:di.toISOString(),
+    data_hora_fim:df.toISOString(),
+    veiculo:document.getElementById('agendVeiculo').value,
+    placa:document.getElementById('agendPlaca').value,
+    cor_veiculo:document.getElementById('agendCor').value,
+    forma_pagamento:document.getElementById('agendPagamento').value,
+    observacoes:document.getElementById('agendObs').value,
+    leva_traz:document.getElementById('agendLevaTraz').checked,
+    valor_total:total,desconto_pct:desc
+  };
   if(id){const i=DATA.agendamentos.findIndex(a=>a.id===id);if(i>=0)Object.assign(DATA.agendamentos[i],dados);}
   else DATA.agendamentos.push({id:uid(),tenant_id:currentTenant?.id,...dados,status:'agendado',ativo:true,created_at:new Date().toISOString()});
   salvarDados();closeModal('modalAgendamento');renderAgendamentos();renderAgenda();renderDashboard();toast('Agendamento salvo!');
@@ -4309,7 +4503,11 @@ function renderTickets(){
   const countEl=document.getElementById('suporteCount');
   if(countEl){if(abertos>0){countEl.textContent=abertos;countEl.style.display='';}else countEl.style.display='none';}
   if(!lista.length){el.innerHTML='<div class="empty"><div class="empty-icon">🎫</div><div class="empty-title">Nenhum chamado</div></div>';return;}
-  el.innerHTML=lista.map(t=>'<div class="ticket-card '+t.status+'" onclick="verTicket(\''+t.id+'\')"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="ticket-title">'+(prioColor[t.prioridade]?'<span style="color:'+prioColor[t.prioridade]+';margin-right:5px">●</span>':'')+'#'+t.numero+' — '+t.titulo+'</div><div class="ticket-meta">'+(t.modulo||'Geral')+' · '+fmtDateTime(t.created_at)+' · '+t.usuario+'</div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge badge-'+(t.status==='aberto'?'blue':t.status==='em_andamento'?'amber':'green')+'">'+{aberto:'Aberto',em_andamento:'Em Andamento',resolvido:'Resolvido'}[t.status]+'</span><button class="btn btn-secondary btn-xs" onclick="event.stopPropagation();editarTicket(\''+t.id+'\')">Editar</button><button class="btn btn-danger btn-xs" onclick="event.stopPropagation();excluirTicket(\''+t.id+'\')">✕</button></div></div><div style="font-size:12px;color:var(--text2);margin-top:6px">'+t.descricao.slice(0,100)+(t.descricao.length>100?'...':'')+'</div></div>').join('');
+  el.innerHTML=lista.map(t=>{
+    const statusLabel={aberto:'Aberto',em_andamento:'Em Andamento',em_analise:'Em Análise',resolvido:'Resolvido',fechado:'Fechado'};
+    const statusBadge={aberto:'badge-blue',em_andamento:'badge-amber',em_analise:'badge-purple',resolvido:'badge-green',fechado:'badge-gray'};
+    return '<div class="ticket-card '+t.status+'"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="ticket-title">'+(prioColor[t.prioridade]?'<span style="color:'+prioColor[t.prioridade]+';margin-right:5px">●</span>':'')+'#'+t.numero+' — '+t.titulo+'</div><div class="ticket-meta">'+(t.modulo||'Geral')+' · '+fmtDateTime(t.created_at)+' · '+t.usuario+'</div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge '+(statusBadge[t.status]||'badge-gray')+'">'+(statusLabel[t.status]||t.status)+'</span><button class="btn btn-danger btn-xs" onclick="excluirTicket(\''+t.id+'\')">✕</button></div></div><div style="font-size:12px;color:var(--text2);margin-top:6px">'+t.descricao.slice(0,100)+(t.descricao.length>100?'...':'')+'</div>'+(t.resolucao?'<div style="margin-top:6px;padding:6px 10px;background:rgba(16,185,129,.08);border-radius:6px;font-size:11px;color:var(--green)"><b>Resposta:</b> '+t.resolucao+'</div>':'')+'</div>';
+  }).join('');
 }
 function abrirModalTicket(){
   document.getElementById('ticketId').value='';document.getElementById('ticketModalTitle').textContent='Novo Chamado';
@@ -4594,6 +4792,8 @@ function renderAdminEmpresa(){
   const vkmEl=document.getElementById('adm_valor_km');
   if(cepEmpEl)cepEmpEl.value=cfgTenant.cep_empresa||'';
   if(vkmEl)vkmEl.value=cfgTenant.valor_km_leva_traz||'';
+  const vagasEl=document.getElementById('adm_vagas');
+  if(vagasEl)vagasEl.value=cfgTenant.vagas_simultaneas||1;
 }
 async function buscarCepAdmin(){
   const cep=document.getElementById('adm_cep').value.replace(/\D/g,'');
@@ -4621,6 +4821,9 @@ function salvarEmpresaAdminCompleto(){
   const vkm=parseFloat(document.getElementById('adm_valor_km')?.value)||0;
   DATA.configuracoes[tid].cep_empresa=cepBase;
   DATA.configuracoes[tid].valor_km_leva_traz=vkm;
+  // Salvar vagas simultâneas
+  const vagas=parseInt(document.getElementById('adm_vagas')?.value)||1;
+  DATA.configuracoes[tid].vagas_simultaneas=vagas;
   // Sync with Configurações page fields too
   const cfgCep=document.getElementById('cfgCepEmpresa');
   const cfgVkm=document.getElementById('cfgValorKmLT');
@@ -4769,18 +4972,44 @@ const DIAS_SEMANA=['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domin
 function renderAgendaOnline(){
   if(!currentTenant)return;
   const cfg=DATA.configuracoes[currentTenant.id]||{};
-  const link='https://gbrsistemas.com.br/agendar/'+( currentTenant.slug||'minha-estetica');
+  // Token único — carregado do Firebase se disponível, senão do localStorage
+  const token=cfg.ao_token||'';
+  const baseUrl='https://gbr-sistemas.vercel.app/agendar';
+  const link=token?(baseUrl+'?t='+token+'&tid='+currentTenant.id):'(nenhum link gerado)';
   document.getElementById('aoLink').value=link;
   document.getElementById('aoAtivo').checked=cfg.ao_ativo!==false;
-  // Horários
   const horarios=cfg.ao_horarios||DIAS_SEMANA.map((d,i)=>({dia:i,nome:d,ativo:i<5,inicio:'08:00',fim:'18:00'}));
-  document.getElementById('aoHorarios').innerHTML=horarios.map((h,i)=>'<div class="online-slot"><div style="display:flex;align-items:center;gap:8px"><label class="switch" style="transform:scale(0.85)"><input type="checkbox" id="aodia_'+i+'" '+(h.ativo?'checked':'')+' onchange=""><span class="switch-slider"></span></label><span style="font-size:13px;min-width:70px">'+h.nome+'</span></div><div style="display:flex;gap:8px;align-items:center"><input type="time" value="'+h.inicio+'" id="aoinicio_'+i+'" style="width:90px;font-size:12px"> às <input type="time" value="'+h.fim+'" id="aofim_'+i+'" style="width:90px;font-size:12px"></div></div>').join('');
-  // Serviços disponíveis online
+  document.getElementById('aoHorarios').innerHTML=horarios.map((h,i)=>'<div class="online-slot"><div style="display:flex;align-items:center;gap:8px"><label class="switch" style="transform:scale(0.85)"><input type="checkbox" id="aodia_'+i+'" '+(h.ativo?'checked':'')+' ><span class="switch-slider"></span></label><span style="font-size:13px;min-width:70px">'+h.nome+'</span></div><div style="display:flex;gap:8px;align-items:center"><input type="time" value="'+h.inicio+'" id="aoinicio_'+i+'" style="width:90px;font-size:12px"> às <input type="time" value="'+h.fim+'" id="aofim_'+i+'" style="width:90px;font-size:12px"></div></div>').join('');
   const servs=DATA.servicos.filter(s=>s.tenant_id===currentTenant.id&&s.ativo);
   const servOnline=cfg.ao_servicos||servs.map(s=>s.id);
   document.getElementById('aoServicos').innerHTML=servs.map(s=>'<div class="online-slot"><div style="display:flex;align-items:center;gap:8px"><label class="switch" style="transform:scale(0.85)"><input type="checkbox" id="aoserv_'+s.id+'" '+(servOnline.includes(s.id)?'checked':'')+' ><span class="switch-slider"></span></label><span style="font-size:13px">'+s.nome+'</span></div><span style="font-size:12px;color:var(--accent)">'+fmtMoney(s.preco_base)+'</span></div>').join('');
 }
-function copiarLinkOnline(){const el=document.getElementById('aoLink');navigator.clipboard?.writeText(el.value).then(()=>toast('Link copiado!'));}
+
+function gerarNovoTokenOnline(){
+  if(!currentTenant)return;
+  if(!confirm('Gerar novo link?\n\nO link anterior deixará de funcionar imediatamente.'))return;
+  const novoToken=Date.now().toString(36)+Math.random().toString(36).substr(2,8);
+  const tid=currentTenant.id;
+  if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
+  DATA.configuracoes[tid].ao_token=novoToken;
+  // Salvar no Firebase para persistência
+  if(_gbrFbDb){
+    try{_gbrFbDb.ref('tenants/'+tid+'/ao_token').set(novoToken);}catch(e){}
+  }
+  salvarDados();
+  renderAgendaOnline();
+  logAuditoria('Gerou novo link de Agenda Online','');
+  toast('✅ Novo link gerado! O link anterior foi invalidado.','success');
+}
+
+function copiarLinkOnline(){
+  const el=document.getElementById('aoLink');
+  const v=el?el.value:'';
+  if(!v||v.includes('nenhum')){toast('Gere um link primeiro','warn');return;}
+  navigator.clipboard?.writeText(v).then(()=>toast('Link copiado!','success')).catch(()=>{
+    const ta=document.createElement('textarea');ta.value=v;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast('Link copiado!','success');
+  });
+}
 function salvarAgendaOnline(){
   const tid=currentTenant?.id;if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   const horarios=DIAS_SEMANA.map((d,i)=>({dia:i,nome:d,ativo:document.getElementById('aodia_'+i)?.checked||false,inicio:document.getElementById('aoinicio_'+i)?.value||'08:00',fim:document.getElementById('aofim_'+i)?.value||'18:00'}));
