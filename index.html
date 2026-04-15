@@ -2650,7 +2650,8 @@ function setAgendTab(tab){
   }
 }
 
-function renderAgendamentos(){\n  const busca=(document.getElementById('agendBusca')?.value||'').toLowerCase();
+function renderAgendamentos(){
+  const busca=(document.getElementById('agendBusca')?.value||'').toLowerCase();
   const status=document.getElementById('agendStatus')?.value||'';
   const lista=DATA.agendamentos.filter(a=>{
     if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
