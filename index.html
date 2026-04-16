@@ -632,7 +632,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
       <div class="nav-item" onclick="showPage('suporte')"><span class="nav-icon">🎫</span>Suporte<span class="nav-count" id="suporteCount" style="display:none">0</span></div>
       <div class="nav-label">Sistema</div>
       <div class="nav-item" onclick="showPage('config')"><span class="nav-icon">⚙</span>Configurações</div>
-      <div class="nav-item" id="navItemAdmin" style="display:none" onclick="showPage('admin')"><span class="nav-icon">🛡</span>Painel Admin</div>
+      <div class="nav-item" id="navItemAdmin" onclick="showPage('admin')"><span class="nav-icon">🛡</span>Painel Admin</div>
     </nav>
     <div class="sidebar-footer">
       <div class="user-row">
@@ -2346,7 +2346,14 @@ function loginSucesso(user){
   document.getElementById('userAvatar').textContent=user.nome.charAt(0).toUpperCase();
   if(currentTenant){document.getElementById('tenantNome').textContent=currentTenant.nome;document.getElementById('tenantSub').textContent=currentTenant.slug;}
   var navAdmin=document.getElementById('navItemAdmin');
-  if(navAdmin) navAdmin.style.display=['owner','admin','superadmin'].includes(user.role)?'flex':'none';
+  if(navAdmin){
+    if(['owner','admin','superadmin'].includes(user.role)){
+      navAdmin.removeAttribute('style');
+      navAdmin.style.display='flex';
+    } else {
+      navAdmin.style.display='none';
+    }
+  }
   verificarCaixa();
   try{carregarAparenciaTenant();}catch(e){console.warn('[GBR] aparência:',e);}
   atualizarFidAlerts();
