@@ -328,6 +328,48 @@ td{padding:11px 14px;vertical-align:middle}
 .admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:699px){.admin-grid{grid-template-columns:1fr}}
 
+/* ═══ AGENDA MULTI-VAGA ═══ */
+.slot-multi{
+  flex-wrap:wrap;
+  gap:3px;
+  align-items:flex-start;
+  padding:2px!important;
+  min-height:40px
+}
+.slot-event{
+  flex:1;
+  min-width:0;
+  font-size:11px;
+  border-radius:5px;
+  padding:3px 6px;
+  cursor:pointer;
+  transition:filter .12s
+}
+.slot-event:hover{filter:brightness(1.15)}
+.slot-cell-add{
+  width:20px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-left:1px dashed var(--border);
+  color:var(--text3);
+  font-size:11px;
+  cursor:pointer;
+  transition:color .12s
+}
+.slot-cell-add:hover{color:var(--accent)}
+
+/* ═══ INFO-BOX ESTADOS ═══ */
+.info-box.warn{
+  background:rgba(245,158,11,.07);
+  border:1px solid rgba(245,158,11,.3);
+  color:var(--accent);
+  border-radius:8px;
+  padding:8px 12px;
+  font-size:12px;
+  line-height:1.6
+}
+
 /* ═══ BADGE PLANO DINÂMICO — sem classe hardcoded .free/.pro ═══ */
 .badge-plano{
   display:inline-block;padding:2px 10px;border-radius:20px;
@@ -1973,11 +2015,23 @@ function _gbrMonitorarLicenca(tenantId) {
       }, 3500);
     }
 
-    // Atualizar modulos_liberados em tempo real sem desconectar
+    // Atualizar modulos_liberados e limites em tempo real sem desconectar
     if (lic.modulos_liberados && Array.isArray(lic.modulos_liberados)) {
       window._gbrModulosLiberados = lic.modulos_liberados;
       window._gbrMaxColaboradores = lic.max_colaboradores || 2;
+      window._gbrMaxVagas = lic.max_vagas || 20;
       _gbrAplicarPaywall();
+      // Atualiza o input de vagas se o admin estiver com a aba aberta
+      var vagasEl = document.getElementById('adm_vagas');
+      if (vagasEl) {
+        vagasEl.max = window._gbrMaxVagas;
+        var titEl = vagasEl.closest('.form-group');
+        if (titEl) {
+          var hint = titEl.querySelector('.vagas-hint');
+          if (!hint) { hint = document.createElement('div'); hint.className='vagas-hint'; hint.style.cssText='font-size:10px;color:var(--text3);margin-top:3px'; titEl.appendChild(hint); }
+          hint.textContent = 'Máximo permitido no plano ' + (window._gbrNomePlano||'atual') + ': ' + window._gbrMaxVagas + ' vaga(s)';
+        }
+      }
     }
   });
   _gbrLicMonitor = function(){ ref.off(); };
@@ -2053,11 +2107,13 @@ async function _gbrLoginFirebase(email, senha) {
     // Tenant tem override direto na licença
     modLibsPromise = Promise.resolve(lic.modulos_liberados);
     window._gbrMaxColaboradores = lic.max_colaboradores || 2;
+    window._gbrMaxVagas = lic.max_vagas || 20;
   } else {
     // Busca do plano base no Firebase
     modLibsPromise = _gbrFbDb.ref('planos/' + (lic.plano || 'basico')).once('value').then(function(pSnap){
       var p = pSnap.val() || {};
       window._gbrMaxColaboradores = p.max_colaboradores || p.colaboradores_max || 2;
+      window._gbrMaxVagas = p.max_vagas || 20;
       if (p.modulos_liberados && Array.isArray(p.modulos_liberados)) return p.modulos_liberados;
       // Fallback: converter objeto bool→array
       return Object.entries(p.modulos||{}).filter(function(kv){return kv[1];}).map(function(kv){return kv[0];});
@@ -2798,10 +2854,18 @@ function renderAgenda(){
   document.getElementById('diaLabel').textContent=diaAgenda.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'});
   const inicio=new Date(diaAgenda);inicio.setHours(0,0,0,0);
   const fim=new Date(diaAgenda);fim.setHours(23,59,59,999);
-  const ags=DATA.agendamentos.filter(a=>{if(currentTenant&&a.tenant_id!==currentTenant.id)return false;if(!a.ativo)return false;const d=new Date(a.data_hora_inicio);return d>=inicio&&d<=fim;});
-  let html='<div class="agenda-grid">';
-  // Pré-calcula quais horas são "início" de evento e quais são slots intermediários bloqueados
-  const hInicio={};// h -> array de eventos que iniciam nessa hora
+  const ags=DATA.agendamentos.filter(a=>{
+    if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
+    if(!a.ativo)return false;
+    const d=new Date(a.data_hora_inicio);return d>=inicio&&d<=fim;
+  });
+
+  // Vagas configuradas pelo tenant
+  const cfg=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
+  const vagasMax=cfg.vagas_simultaneas||1;
+
+  // Pré-calcula eventos por hora
+  const hInicio={};   // h -> array de eventos que iniciam nessa hora
   const hBloqueado={};// h -> array de eventos que cobrem essa hora mas não iniciam nela
   for(let h=7;h<=20;h++){hInicio[h]=[];hBloqueado[h]=[];}
   ags.forEach(a=>{
@@ -2812,19 +2876,65 @@ function renderAgenda(){
       else if(h>hi&&h<hf)hBloqueado[h].push(a);
     }
   });
+
+  let html='<div class="agenda-grid">';
   for(let h=7;h<=20;h++){
-    html+='<div class="hora-cell">'+String(h).padStart(2,'0')+':00</div>';
     const bloqueados=hBloqueado[h];
     const iniciados=hInicio[h];
-    if(bloqueados.length){
-      // Slot intermediário: mostra banner visual de continuação
-      html+='<div class="slot-cell slot-blocked" style="background:rgba(59,130,246,.06);border-left:3px solid var(--blue);cursor:default;padding:4px 8px">';
-      bloqueados.forEach(a=>{const cli=DATA.clientes.find(c=>c.id===a.cliente_id);const serv=DATA.servicos.find(s=>s.id===a.servico_id);html+='<span style="font-size:10px;color:var(--blue);opacity:.7">↕ '+(cli?.nome_completo?.split(' ')[0]||'?')+' · '+(serv?.nome||'')+'</span>';});
-      html+='</div>';
-    } else if(!iniciados.length){
-      html+='<div class="slot-cell" onclick="abrirModalAgendamentoHora('+h+')"><span style="font-size:10px;color:var(--text3);padding:4px">+ agendar</span></div>';
+    const totalNoSlot=bloqueados.length+iniciados.length;
+    const vagasLivres=vagasMax-totalNoSlot;
+    const lotado=vagasLivres<=0&&vagasMax>0;
+
+    html+='<div class="hora-cell">'+String(h).padStart(2,'0')+':00</div>';
+
+    if(!iniciados.length&&!bloqueados.length){
+      // Slot vazio — mostra vagas disponíveis
+      html+='<div class="slot-cell" onclick="abrirModalAgendamentoHora('+h+')">'
+        +'<span style="font-size:10px;color:var(--text3);padding:4px">+ agendar'
+        +(vagasMax>1?' ('+vagasMax+' vagas)':'')+'</span>'
+        +'</div>';
     } else {
-      html+='<div class="slot-cell">';iniciados.forEach(a=>{const cli=DATA.clientes.find(c=>c.id===a.cliente_id);const serv=DATA.servicos.find(s=>s.id===a.servico_id);html+='<div class="slot-event '+a.status+'" title="'+statusLabel(a.status)+'"><strong>'+(cli?.nome_completo||'-')+'</strong><br><span style="font-size:11px">'+(serv?.nome||'')+' · '+(a.veiculo||'')+'</span></div>';});html+='</div>';
+      // Slot com eventos — renderiza TODOS os cards lado a lado (multi-vaga)
+      const allEvts=[...iniciados,...bloqueados];
+      const isContinuacao=iniciados.length===0&&bloqueados.length>0;
+      html+='<div class="slot-cell slot-multi'+(isContinuacao?' slot-blocked':'')
+        +'" style="display:flex;flex-wrap:wrap;gap:3px;align-items:flex-start;'
+        +(isContinuacao?'background:rgba(59,130,246,.04);border-left:3px solid var(--blue);':'')
+        +(lotado?'background:rgba(239,68,68,.04);':'')
+        +'">';
+
+      allEvts.forEach(a=>{
+        const cli=DATA.clientes.find(c=>c.id===a.cliente_id);
+        const serv=DATA.servicos.find(s=>s.id===a.servico_id);
+        const isCont=!iniciados.includes(a);
+        if(isCont){
+          // Evento que continua (não iniciou nesta hora) — badge de continuação
+          html+='<span style="font-size:10px;color:var(--blue);opacity:.7;padding:2px 4px">↕ '
+            +(cli?.nome_completo?.split(' ')[0]||'?')+' · '+(serv?.nome||'')+'</span>';
+        } else {
+          // Evento que inicia nesta hora — card completo clicável
+          html+='<div class="slot-event '+a.status+'" '
+            +'style="flex:1;min-width:0;cursor:pointer" '
+            +'onclick="event.stopPropagation();abrirEditarAgendamento(''+a.id+'')" '
+            +'title="'+statusLabel(a.status)+' — clique para editar">'
+            +'<strong style="font-size:11px">'+(cli?.nome_completo?.split(' ')[0]||'-')+'</strong>'
+            +'<br><span style="font-size:10px;opacity:.8">'+(serv?.nome||'')+'</span>'
+            +(a.veiculo?'<br><span style="font-size:9px;opacity:.6">🚗 '+a.veiculo+'</span>':'')
+            +'</div>';
+        }
+      });
+
+      // Indicador de vagas restantes (se houver espaço)
+      if(vagasLivres>0&&!isContinuacao){
+        html+='<div class="slot-cell-add" onclick="abrirModalAgendamentoHora('+h+')" '
+          +'style="flex-shrink:0;width:24px;display:flex;align-items:center;justify-content:center;'
+          +'border-left:1px dashed var(--border);cursor:pointer;font-size:10px;color:var(--text3)" '
+          +'title="'+vagasLivres+' vaga(s) disponível(is)">+</div>';
+      } else if(lotado&&!isContinuacao){
+        html+='<span style="font-size:9px;color:var(--red);align-self:flex-end;margin-left:auto;white-space:nowrap">🅿 Lotado</span>';
+      }
+
+      html+='</div>';
     }
   }
   html+='</div>';
@@ -3118,17 +3228,37 @@ function checarConflito(){
   if(!serv){cbox.style.display='none';return;}
   const inicio=new Date(data+'T'+hora);
   const fim=new Date(inicio.getTime()+(serv.tempo_estimado_min||60)*60000);
-  const conflitos=DATA.agendamentos.filter(a=>{
+
+  // ── Vagas múltiplas: conta agendamentos no mesmo bloco de horário ──
+  const cfg=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
+  const vagasMax=cfg.vagas_simultaneas||1;
+
+  const agendNoHorario=DATA.agendamentos.filter(a=>{
     if(exclId&&a.id===exclId)return false;
     if(!a.ativo||['cancelado','concluido'].includes(a.status))return false;
     if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
     const ai=new Date(a.data_hora_inicio),af=new Date(a.data_hora_fim);
     return ai<fim&&af>inicio;
   });
-  if(conflitos.length){
+
+  const vagasOcupadas=agendNoHorario.length;
+  const vagasLivres=vagasMax-vagasOcupadas;
+
+  if(vagasOcupadas>=vagasMax){
+    // Todas as vagas ocupadas — horário lotado
     cbox.style.display='block';
-    cbox.innerHTML='⚠ Conflito de horário com: '+conflitos.map(a=>'<strong>'+cliNome(a.cliente_id)+'</strong> ('+fmtTime(a.data_hora_inicio)+'–'+fmtTime(a.data_hora_fim)+')').join(', ');
-  }else{cbox.style.display='none';}
+    cbox.className='info-box danger';
+    cbox.innerHTML='🅿 Horário Lotado — todas as '+vagasMax+' vaga(s) ocupadas: '
+      +agendNoHorario.map(a=>'<strong>'+cliNome(a.cliente_id)+'</strong> ('+fmtTime(a.data_hora_inicio)+'–'+fmtTime(a.data_hora_fim)+')').join(', ');
+  } else if(vagasOcupadas>0){
+    // Há vagas mas algumas ocupadas — aviso informativo
+    cbox.style.display='block';
+    cbox.className='info-box warn';
+    cbox.innerHTML='🅿 '+vagasLivres+' vaga(s) disponível(is) neste horário de '+vagasMax+'. Ocupadas: '
+      +agendNoHorario.map(a=>'<strong>'+cliNome(a.cliente_id)+'</strong>').join(', ');
+  } else {
+    cbox.style.display='none';
+  }
 }
 
 function toggleLT(){
@@ -3386,6 +3516,7 @@ function excluirServico(id){if(!confirm('Excluir serviço?'))return;const i=DATA
 
 // ===== ESTOQUE =====
 function renderEstoque(){
+  if(!_gbrModuloLiberado('estoque')){console.warn('[GBR] renderEstoque bloqueado — módulo não licenciado');return;}
   const busca=(document.getElementById('estoqueBusca')?.value||'').toLowerCase();
   const cat=document.getElementById('estoqueCat')?.value||'';
   const lista=DATA.produtos.filter(p=>{if(currentTenant&&p.tenant_id!==currentTenant.id)return false;if(!p.ativo)return false;if(busca&&!p.nome.toLowerCase().includes(busca))return false;if(cat&&p.categoria!==cat)return false;return true;});
@@ -3480,6 +3611,7 @@ function excluirProduto(id){if(!confirm('Excluir produto?'))return;const i=DATA.
 
 // ===== FICHA TÉCNICA =====
 function renderFichas(){
+  if(!_gbrModuloLiberado('fichatecnica')){console.warn('[GBR] renderFichas bloqueado — módulo não licenciado');return;}
   const lista=DATA.servicos.filter(s=>currentTenant&&s.tenant_id===currentTenant.id&&s.ativo);
   const el=document.getElementById('fichasLista');
   document.getElementById('fichaEditor').style.display='none';
@@ -3611,6 +3743,7 @@ function atualizarFidAlerts(){
 }
 
 function renderFidelidade(){
+  if(!_gbrModuloLiberado('fidelidade')){console.warn('[GBR] renderFidelidade bloqueado — módulo não licenciado');return;}
   if(!currentTenant)return;
   const regras=DATA.regras_fidelidade.filter(r=>r.tenant_id===currentTenant.id);
   const el=document.getElementById('fidRegras');
@@ -3697,6 +3830,7 @@ function verificarCaixa(){
 }
 
 function renderCaixa(){
+  if(!_gbrModuloLiberado('caixa')){console.warn('[GBR] renderCaixa bloqueado — módulo não licenciado');return;}
   verificarCaixa();
   const el=document.getElementById('caixaConteudo');
   if(!currentCaixa){
@@ -3811,6 +3945,7 @@ function confirmarMovCaixa(){
 
 // ===== CHECKLIST =====
 function renderChecklists(){
+  if(!_gbrModuloLiberado('checklist')){console.warn('[GBR] renderChecklists bloqueado — módulo não licenciado');return;}
   const lista=DATA.checklists.filter(c=>currentTenant&&c.tenant_id===currentTenant.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const tb=document.getElementById('chkTbody');
   if(!lista.length){tb.innerHTML='<tr><td colspan="8" class="empty">Nenhuma vistoria realizada</td></tr>';return;}
@@ -4271,11 +4406,29 @@ function renderAgendaSemana(){
         return ai>=si&&ai<sf;
       });
       html+='<div class="semana-cell'+(isHoje?' hoje':'')+'">';
+      // Múltiplos cards por célula — suporte multi-vaga
+      const cfg_s=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
+      const vagasMax_s=cfg_s.vagas_simultaneas||1;
+      const lotado_s=evts.length>=vagasMax_s;
       evts.forEach(a=>{
         const cli=DATA.clientes.find(c=>c.id===a.cliente_id);
         const corMap={agendado:'rgba(59,130,246,.2)',em_andamento:'rgba(245,158,11,.2)',concluido:'rgba(16,185,129,.2)',cancelado:'rgba(239,68,68,.2)'};
-        html+='<div class="semana-evento" style="background:'+(corMap[a.status]||corMap.agendado)+';color:var(--text)">'+(((cli?.nome_completo||'-').split(' ')[0]))+'</div>';
+        html+='<div class="semana-evento" '
+          +'style="background:'+(corMap[a.status]||corMap.agendado)+';color:var(--text);cursor:pointer" '
+          +'onclick="abrirEditarAgendamento(''+a.id+'')" '
+          +'title="'+statusLabel(a.status)+' — clique para editar">'
+          +(((cli?.nome_completo||'-').split(' ')[0]))
+          +'</div>';
       });
+      if(evts.length===0){
+        html+='<div class="semana-add-btn" onclick="(function(){diaAgenda=new Date('+si.getTime()+');irHoje&&(diaAgenda=new Date('+si.getTime()+'));renderAgenda();})()" '
+          +'style="font-size:9px;color:var(--text3);padding:1px 2px;cursor:pointer;opacity:.5">+</div>';
+      } else if(!lotado_s&&vagasMax_s>1){
+        html+='<div style="font-size:8px;color:var(--text3);padding:1px 2px;cursor:pointer;opacity:.6" '
+          +'title="'+(vagasMax_s-evts.length)+' vaga(s) livre(s)">+'+(vagasMax_s-evts.length)+'</div>';
+      } else if(lotado_s){
+        html+='<div style="font-size:8px;color:var(--red);padding:1px 2px;opacity:.7">🅿</div>';
+      }
       html+='</div>';
     });
   }
@@ -4299,6 +4452,7 @@ function getRelPeriodo(){
   return{ini,fim};
 }
 function renderRelatorios(){
+  if(!_gbrModuloLiberado('relatorios')){console.warn('[GBR] renderRelatorios bloqueado — módulo não licenciado');return;}
   if(!currentTenant)return;
   const{ini,fim}=getRelPeriodo();
   const ags=DATA.agendamentos.filter(a=>a.tenant_id===currentTenant.id&&a.ativo&&a.status==='concluido'&&new Date(a.data_hora_inicio)>=ini&&new Date(a.data_hora_inicio)<=fim);
@@ -4444,6 +4598,7 @@ const WA_TEMPLATES_DEFAULT=[
 ];
 
 function renderWhatsapp(){
+  if(!_gbrModuloLiberado('whatsapp')){console.warn('[GBR] renderWhatsapp bloqueado — módulo não licenciado');return;}
   if(!DATA.wa_templates)DATA.wa_templates=[];
   if(!DATA.wa_historico)DATA.wa_historico=[];
   const tenantTpls=DATA.wa_templates.filter(t=>!t.tenant_id||t.tenant_id===currentTenant?.id);
@@ -4623,6 +4778,7 @@ function logAuditoria(acao,detalhes){
 
 // ══ FINANCEIRO ════════════════════════════════════════════
 function renderFinanceiro(){
+  if(!_gbrModuloLiberado('financeiro')){console.warn('[GBR] renderFinanceiro bloqueado — módulo não licenciado');return;}
   if(!currentTenant)return;
   const hoje=new Date();
   const de=document.getElementById('finDe');
@@ -5065,7 +5221,18 @@ function renderAdminEmpresa(){
   if(cepEmpEl)cepEmpEl.value=cfgTenant.cep_empresa||'';
   if(vkmEl)vkmEl.value=cfgTenant.valor_km_leva_traz||'';
   const vagasEl=document.getElementById('adm_vagas');
-  if(vagasEl)vagasEl.value=cfgTenant.vagas_simultaneas||1;
+  if(vagasEl){
+    const maxV = window._gbrMaxVagas || 20;
+    vagasEl.value = cfgTenant.vagas_simultaneas || 1;
+    vagasEl.max   = maxV;
+    // Atualiza ou cria hint abaixo do input
+    const grp = vagasEl.closest('.form-group') || vagasEl.parentElement;
+    if(grp){
+      let hint = grp.querySelector('.vagas-hint');
+      if(!hint){ hint=document.createElement('div'); hint.className='vagas-hint'; hint.style.cssText='font-size:10px;color:var(--text3);margin-top:3px'; grp.appendChild(hint); }
+      hint.textContent = 'Máximo permitido no plano ' + (window._gbrNomePlano||'atual') + ': ' + maxV + ' vaga(s)';
+    }
+  }
 }
 async function buscarCepAdmin(){
   const cep=document.getElementById('adm_cep').value.replace(/\D/g,'');
@@ -5093,9 +5260,17 @@ function salvarEmpresaAdminCompleto(){
   const vkm=parseFloat(document.getElementById('adm_valor_km')?.value)||0;
   DATA.configuracoes[tid].cep_empresa=cepBase;
   DATA.configuracoes[tid].valor_km_leva_traz=vkm;
-  // Salvar vagas simultâneas
-  const vagas=parseInt(document.getElementById('adm_vagas')?.value)||1;
-  DATA.configuracoes[tid].vagas_simultaneas=vagas;
+  // Salvar vagas simultâneas — respeita max_vagas do plano
+  const vagasInput=parseInt(document.getElementById('adm_vagas')?.value)||1;
+  const maxVagasPlano=window._gbrMaxVagas||20; // carregado do plano via Firebase
+  let vagasFinal=vagasInput;
+  if(vagasInput>maxVagasPlano){
+    toast('⚠ Seu plano permite configurar até '+maxVagasPlano+' vaga(s). Ajustado automaticamente.','warn');
+    vagasFinal=maxVagasPlano;
+    const vagasEl=document.getElementById('adm_vagas');
+    if(vagasEl){vagasEl.value=maxVagasPlano;}
+  }
+  DATA.configuracoes[tid].vagas_simultaneas=vagasFinal;
   // Sync with Configurações page fields too
   const cfgCep=document.getElementById('cfgCepEmpresa');
   const cfgVkm=document.getElementById('cfgValorKmLT');
