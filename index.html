@@ -10,6 +10,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>GBR Sistemas v5.0 — Gestão para Estéticas Automotivas</title>
 <!-- ══ Firebase SDK — Integração com Console de Licenciamento ══ -->
+<!-- Supabase SDK (sync multi-device + RLS) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Firebase SDK (licenciamento / Console legado) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -2125,6 +2128,308 @@ function _gbrDesativarSync() {
   _gbrSyncListeners = {};
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+//  GBR SUPABASE ADAPTER  v2.0
+//  Substitui localStorage-only por Supabase como fonte única de
+//  verdade. Resolve: dados criados no mobile não aparecem no desktop.
+//
+//  Credenciais do projeto GBRsistemassa:
+//    Project ID : ogzqgnatdtxyeytrdizb
+//    URL        : https://ogzqgnatdtxyeytrdizb.supabase.co
+//
+//  NOTA: A anon key abaixo é segura para uso no browser com RLS ativo.
+//  Cada usuário só acessa dados do seu próprio tenant (policy no banco).
+// ══════════════════════════════════════════════════════════════════
+
+var _sbClient  = null;  // cliente Supabase
+var _sbTenantId = null; // tenant_id do usuário logado
+var _sbUserId   = null; // auth.uid() do Supabase
+var _sbChannels = [];   // channels de realtime ativos
+var _sbSyncOk   = false;
+
+// Configuração Supabase
+var GBR_SB_URL  = 'https://ogzqgnatdtxyeytrdizb.supabase.co';
+var GBR_SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nenFnbmF0ZHR4eWV5dHJkaXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ4MjU4NTQsImV4cCI6MjA2MDQwMTg1NH0.placeholder_replace_with_real_key';
+
+// Mapeamento tabela Supabase ↔ chave DATA local
+var _GBR_TABLE_MAP = {
+  clientes:               'clientes',
+  servicos:               'servicos',
+  agendamentos:           'agendamentos',
+  produtos:               'produtos',
+  movimentacoes_estoque:  'movimentacoes',
+  caixas:                 'caixas',
+  movimentacoes_financeiras: 'movimentacoes_fin',
+  regras_fidelidade:      'regras_fidelidade',
+  fichas_tecnicas:        'fichas',
+  checklists:             'checklists'
+};
+
+// ── Inicializar Supabase Client ──────────────────────────────────
+function _sbInit() {
+  try {
+    if (typeof supabase === 'undefined' || !supabase.createClient) {
+      console.warn('[GBR SB] SDK Supabase não carregado.');
+      return false;
+    }
+    _sbClient = supabase.createClient(GBR_SB_URL, GBR_SB_ANON, {
+      auth: { persistSession: true, autoRefreshToken: true },
+      realtime: { params: { eventsPerSecond: 10 } }
+    });
+    console.log('[GBR SB] Cliente Supabase inicializado.');
+    return true;
+  } catch(e) {
+    console.warn('[GBR SB] Erro ao inicializar:', e.message);
+    return false;
+  }
+}
+
+// ── Login no Supabase com email/senha ────────────────────────────
+async function _sbLogin(email, senha) {
+  if (!_sbClient) return null;
+  try {
+    var res = await _sbClient.auth.signInWithPassword({ email, password: senha });
+    if (res.error) {
+      console.warn('[GBR SB] Login falhou:', res.error.message);
+      return null;
+    }
+    _sbUserId = res.data.user.id;
+    console.log('[GBR SB] Login Supabase OK:', email);
+    return res.data;
+  } catch(e) {
+    console.warn('[GBR SB] Exceção no login:', e.message);
+    return null;
+  }
+}
+
+// ── Carregar TODOS os dados do tenant do Supabase ────────────────
+async function _sbCarregarDados(tenantId) {
+  if (!_sbClient || !tenantId) return false;
+  _gbrAtualizarIndicadorSync('saving', 'Carregando...');
+  try {
+    // Carregar todas as tabelas em paralelo
+    var queries = Object.keys(_GBR_TABLE_MAP).map(async function(tabela) {
+      var chave = _GBR_TABLE_MAP[tabela];
+      var { data, error } = await _sbClient
+        .from(tabela)
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('criado_em', { ascending: true });
+      if (error) {
+        console.warn('[GBR SB] Erro ao carregar ' + tabela + ':', error.message);
+        return;
+      }
+      DATA[chave] = data || [];
+      // Atualizar cache local
+      try { localStorage.setItem('gbr_' + chave, JSON.stringify(DATA[chave])); } catch(e) {}
+    });
+
+    // Carregar config do tenant
+    queries.push((async function() {
+      var { data } = await _sbClient
+        .from('tenants')
+        .select('config, aparencia, vagas_por_horario, max_vagas, modulos_liberados, nome_exibicao_plano, wa_config')
+        .eq('id', tenantId)
+        .single();
+      if (data) {
+        // Aplicar config local
+        if (!DATA.configuracoes) DATA.configuracoes = {};
+        DATA.configuracoes[tenantId] = Object.assign(
+          DATA.configuracoes[tenantId] || {},
+          data.config || {},
+          { vagas_simultaneas: data.vagas_por_horario || 1,
+            wa_config: data.wa_config || {} }
+        );
+        // Atualizar limites do plano em tempo real
+        if (data.max_vagas)           window._gbrMaxVagas = data.max_vagas;
+        if (data.modulos_liberados)   window._gbrModulosLiberados = data.modulos_liberados;
+        if (data.nome_exibicao_plano) window._gbrNomePlano = data.nome_exibicao_plano;
+        _gbrAplicarPaywall();
+      }
+    })());
+
+    await Promise.all(queries);
+    _sbSyncOk = true;
+    _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
+    console.log('[GBR SB] Dados carregados do Supabase.');
+    return true;
+  } catch(e) {
+    console.warn('[GBR SB] Erro ao carregar dados:', e.message);
+    _gbrAtualizarIndicadorSync('off', 'Erro sync');
+    return false;
+  }
+}
+
+// ── Ativar Realtime Subscriptions ────────────────────────────────
+// Escuta mudanças em tempo real — quando QUALQUER dispositivo
+// salvar um dado, todos os outros são notificados automaticamente.
+function _sbAtivarRealtime(tenantId) {
+  if (!_sbClient || !tenantId) return;
+  // Encerrar channels anteriores
+  _sbChannels.forEach(function(ch) { try { _sbClient.removeChannel(ch); } catch(e) {} });
+  _sbChannels = [];
+
+  // Tabelas que têm realtime habilitado
+  var tabelasRealtime = [
+    'agendamentos', 'clientes', 'servicos', 'produtos',
+    'caixas', 'movimentacoes_financeiras', 'regras_fidelidade', 'checklists'
+  ];
+
+  tabelasRealtime.forEach(function(tabela) {
+    var chave = _GBR_TABLE_MAP[tabela];
+    var channel = _sbClient
+      .channel('gbr_' + tabela + '_' + tenantId)
+      .on('postgres_changes', {
+        event: '*',        // INSERT, UPDATE, DELETE
+        schema: 'public',
+        table: tabela,
+        filter: 'tenant_id=eq.' + tenantId
+      }, function(payload) {
+        console.log('[GBR Realtime] ' + tabela + ' ' + payload.eventType);
+        _sbHandleRealtimeChange(tabela, chave, payload);
+      })
+      .subscribe(function(status) {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GBR Realtime] Inscrito em:', tabela);
+        }
+      });
+    _sbChannels.push(channel);
+  });
+
+  // Channel dedicado para mudanças na licença/vagas do tenant
+  var tenantChannel = _sbClient
+    .channel('gbr_tenant_' + tenantId)
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'tenants',
+      filter: 'id=eq.' + tenantId
+    }, function(payload) {
+      var t = payload.new;
+      if (!t) return;
+      // Kill switch em tempo real
+      if (t.kill_switch === true || t.status_licenca === 'inativo') {
+        var overlay = document.createElement('div');
+        overlay.id = 'gbr-kill-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.93);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px';
+        overlay.innerHTML = '<div style="font-size:48px">🔒</div>'
+          + '<div style="font-family:sans-serif;font-size:18px;font-weight:700;color:#fff;text-align:center;max-width:420px">🔒 Licença Suspensa/Bloqueada pelo administrador.</div>'
+          + '<div style="font-size:13px;color:#aaa">Você será desconectado em instantes...</div>';
+        if (!document.getElementById('gbr-kill-overlay')) document.body.appendChild(overlay);
+        setTimeout(function() { fazerLogout(); var ol = document.getElementById('gbr-kill-overlay'); if (ol) ol.remove(); }, 3500);
+        return;
+      }
+      // Atualizar limites/módulos em tempo real
+      if (t.max_vagas)           window._gbrMaxVagas = t.max_vagas;
+      if (t.modulos_liberados)   window._gbrModulosLiberados = t.modulos_liberados;
+      if (t.nome_exibicao_plano) window._gbrNomePlano = t.nome_exibicao_plano;
+      if (t.vagas_por_horario && DATA.configuracoes && tenantId) {
+        if (!DATA.configuracoes[tenantId]) DATA.configuracoes[tenantId] = {};
+        DATA.configuracoes[tenantId].vagas_simultaneas = t.vagas_por_horario;
+      }
+      _gbrAplicarPaywall();
+    })
+    .subscribe();
+  _sbChannels.push(tenantChannel);
+
+  console.log('[GBR Realtime] ' + tabelasRealtime.length + ' subscriptions ativas.');
+}
+
+// ── Handler de mudança realtime ──────────────────────────────────
+function _sbHandleRealtimeChange(tabela, chaveData, payload) {
+  var arr = DATA[chaveData];
+  if (!Array.isArray(arr)) arr = DATA[chaveData] = [];
+  var novo = payload.new;
+  var id   = novo ? novo.id : (payload.old && payload.old.id);
+
+  switch(payload.eventType) {
+    case 'INSERT':
+      if (novo && !arr.find(function(x) { return x.id === novo.id; })) {
+        arr.push(novo);
+      }
+      break;
+    case 'UPDATE':
+      if (novo) {
+        var idx = arr.findIndex(function(x) { return x.id === novo.id; });
+        if (idx >= 0) arr[idx] = novo; else arr.push(novo);
+      }
+      break;
+    case 'DELETE':
+      if (id) {
+        DATA[chaveData] = arr.filter(function(x) { return x.id !== id; });
+      }
+      break;
+  }
+  // Atualizar cache local
+  try { localStorage.setItem('gbr_' + chaveData, JSON.stringify(DATA[chaveData])); } catch(e) {}
+  // Re-renderizar página ativa
+  _gbrAtualizarIndicadorSync('ok', 'Atualizado');
+  _gbrReRenderPaginaAtiva();
+}
+
+// ── Operações CRUD Supabase ──────────────────────────────────────
+
+// UPSERT genérico (insert ou update)
+async function _sbUpsert(tabela, dados) {
+  if (!_sbClient) return null;
+  var { data, error } = await _sbClient.from(tabela).upsert(dados).select().single();
+  if (error) { console.warn('[GBR SB] Upsert ' + tabela + ':', error.message); return null; }
+  return data;
+}
+
+// DELETE (soft: marca ativo=false)
+async function _sbSoftDelete(tabela, id) {
+  if (!_sbClient) return;
+  var { error } = await _sbClient.from(tabela).update({ ativo: false }).eq('id', id);
+  if (error) console.warn('[GBR SB] SoftDelete ' + tabela + ':', error.message);
+}
+
+// Verificar vagas disponíveis via RPC (regra no banco, à prova de bypass)
+async function _sbVerificarVagas(tenantId, inicio, fim, excluirId) {
+  if (!_sbClient) return { disponivel: true, vagas_max: 1, ocupados: 0, disponiveis: 1 };
+  var { data, error } = await _sbClient.rpc('verificar_vagas', {
+    p_tenant_id:  tenantId,
+    p_inicio:     inicio,
+    p_fim:        fim,
+    p_excluir_id: excluirId || null
+  });
+  if (error) {
+    console.warn('[GBR SB] verificar_vagas RPC:', error.message);
+    // Fallback local
+    var cfg = DATA.configuracoes && tenantId ? DATA.configuracoes[tenantId] || {} : {};
+    return { disponivel: true, vagas_max: cfg.vagas_simultaneas || 1 };
+  }
+  return data;
+}
+
+// Registrar log de auditoria
+async function _sbLogAuditoria(acao, modulo, detalhes) {
+  if (!_sbClient || !_sbTenantId) return;
+  await _sbClient.from('audit_logs').insert({
+    tenant_id:  _sbTenantId,
+    user_id:    _sbUserId || null,
+    user_email: (currentUser && currentUser.email) || null,
+    acao:       acao,
+    modulo:     modulo || null,
+    detalhes:   detalhes || null
+  });
+}
+
+// Desconectar tudo ao fazer logout
+function _sbDesconectar() {
+  _sbChannels.forEach(function(ch) { try { _sbClient && _sbClient.removeChannel(ch); } catch(e) {} });
+  _sbChannels = [];
+  _sbSyncOk   = false;
+  _sbTenantId = null;
+  _sbUserId   = null;
+  if (_sbClient) { try { _sbClient.auth.signOut(); } catch(e) {} }
+  _gbrAtualizarIndicadorSync('off', 'Offline');
+}
+
+// Inicializar na carga da página
+_sbInit();
+
 // ════════════════════════════════════════════════════════
 //  GBR LICENSE BRIDGE — Integração Firebase ↔ Console
 // ════════════════════════════════════════════════════════
@@ -2407,11 +2712,32 @@ async function _gbrLoginFirebase(email, senha) {
   // Monitoramento em tempo real de licença
   _gbrMonitorarLicenca(tenantId);
 
-  // ── SINCRONIZAÇÃO MULTI-DEVICE ──────────────────────────────
-  // Ativa o Firebase como fonte única de verdade para dados
-  // operacionais. Resolve: dados criados no mobile não aparecem
-  // no desktop e vice-versa.
-  setTimeout(function() { _gbrAtivarSync(tenantId); }, 500);
+  // ── SUPABASE: Login + carga de dados + realtime ────────────
+  _sbTenantId = tenantId;
+  (async function() {
+    try {
+      // Tentar login Supabase com as mesmas credenciais
+      var sbData = await _sbLogin(email, senha);
+      if (sbData) {
+        _sbUserId = sbData.user.id;
+      }
+      // Carregar dados do tenant do Supabase (substitui localStorage)
+      var ok = await _sbCarregarDados(tenantId);
+      if (ok) {
+        // Ativar realtime subscriptions
+        _sbAtivarRealtime(tenantId);
+        // Re-render após carga (dados podem ter mudado vs cache local)
+        setTimeout(_gbrReRenderPaginaAtiva, 300);
+      } else {
+        // Fallback: usar dados do localStorage já carregados
+        console.warn('[GBR SB] Usando dados do localStorage como fallback.');
+        _gbrAtivarSync(tenantId); // Firebase sync como fallback secundário
+      }
+    } catch(e) {
+      console.warn('[GBR SB] Erro na inicialização do sync:', e.message);
+      _gbrAtivarSync(tenantId);
+    }
+  })();
 
   // Monitorar notificações enviadas pelo console
   if(_gbrFbDb&&tenantId){
@@ -2962,13 +3288,15 @@ function atualizarBadgeNotif(){
 }
 
 function fazerLogout(){
-  // Desativar sync Firebase ao sair
+  // Desconectar Supabase (realtime + auth)
+  if (typeof _sbDesconectar === 'function') _sbDesconectar();
+  // Desativar Firebase sync legado
   if (typeof _gbrDesativarSync === 'function') _gbrDesativarSync();
   if (typeof _gbrFbAuth !== 'undefined' && _gbrFbAuth) {
     try { _gbrFbAuth.signOut(); } catch(e) {}
   }
   localStorage.removeItem('gbr_sessao');
-  currentUser=null;currentTenant=null;currentCaixa=null;
+  currentUser=null;currentTenant=null;currentCaixa=null;_sbTenantId=null;
   document.getElementById('appShell').style.display='none';
   document.getElementById('trocaSenhaPage').style.display='none';
   document.getElementById('loginPage').style.display='flex';
@@ -3309,7 +3637,17 @@ function mudarStatus(id,novoSt){
   }
   if(novoSt==='agendado')_dispararWaAutomatico('confirmacao',DATA.agendamentos[idx]);
   logAuditoria('Status Agendamento','De "'+statusLabel(agAntes)+'" para "'+statusLabel(novoSt)+'" | '+cliNome(DATA.agendamentos[idx].cliente_id));
-  salvarDados();renderAgendamentos();renderAgenda();renderDashboard();toast('Status: '+statusLabel(novoSt));
+  // Persistir no Supabase
+  if(_sbClient&&_sbTenantId){
+    const ag=DATA.agendamentos[idx];
+    _sbUpsert('agendamentos',{id:ag.id,tenant_id:ag.tenant_id,status:ag.status,atualizado_em:new Date().toISOString()});
+    // Atualizar pontos do cliente no Supabase
+    if(novoSt==='concluido'){
+      const cli=DATA.clientes.find(c=>c.id===ag.cliente_id);
+      if(cli) _sbUpsert('clientes',{id:cli.id,tenant_id:cli.tenant_id,pontos_fidelidade:cli.pontos_fidelidade});
+    }
+  } else { salvarDados(); }
+  renderAgendamentos();renderAgenda();renderDashboard();toast('Status: '+statusLabel(novoSt));
 }
 
 function concluirComChecklist(id){
@@ -3489,7 +3827,7 @@ function onServicoCh(){
   calcTotalAgend();
 }
 
-function checarConflito(){
+async function checarConflito(){
   const sid=document.getElementById('agendServico').value;
   const data=document.getElementById('agendData').value;
   const hora=document.getElementById('agendHora').value;
@@ -3501,33 +3839,41 @@ function checarConflito(){
   const inicio=new Date(data+'T'+hora);
   const fim=new Date(inicio.getTime()+(serv.tempo_estimado_min||60)*60000);
 
-  // ── Vagas múltiplas: conta agendamentos no mesmo bloco de horário ──
-  const cfg=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
-  const vagasMax=cfg.vagas_simultaneas||1;
+  let vagasMax=1, vagasOcupadas=0, vagasLivres=1, disponivel=true;
 
-  const agendNoHorario=DATA.agendamentos.filter(a=>{
-    if(exclId&&a.id===exclId)return false;
-    if(!a.ativo||['cancelado','concluido'].includes(a.status))return false;
-    if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
-    const ai=new Date(a.data_hora_inicio),af=new Date(a.data_hora_fim);
-    return ai<fim&&af>inicio;
-  });
+  // ── Verificação via RPC Supabase (à prova de bypass) ──────────
+  if (_sbClient && _sbTenantId) {
+    const resultado = await _sbVerificarVagas(
+      _sbTenantId, inicio.toISOString(), fim.toISOString(), exclId||null
+    );
+    vagasMax     = resultado.vagas_max     || 1;
+    vagasOcupadas= resultado.ocupados      || 0;
+    vagasLivres  = resultado.disponiveis   || 0;
+    disponivel   = resultado.disponivel    !== false;
+  } else {
+    // Fallback local (modo offline)
+    const cfg=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
+    vagasMax=cfg.vagas_simultaneas||1;
+    const agendNoHorario=DATA.agendamentos.filter(a=>{
+      if(exclId&&a.id===exclId)return false;
+      if(!a.ativo||['cancelado','concluido'].includes(a.status))return false;
+      if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
+      const ai=new Date(a.data_hora_inicio),af=new Date(a.data_hora_fim);
+      return ai<fim&&af>inicio;
+    });
+    vagasOcupadas=agendNoHorario.length;
+    vagasLivres=vagasMax-vagasOcupadas;
+    disponivel=vagasLivres>0;
+  }
 
-  const vagasOcupadas=agendNoHorario.length;
-  const vagasLivres=vagasMax-vagasOcupadas;
-
-  if(vagasOcupadas>=vagasMax){
-    // Todas as vagas ocupadas — horário lotado
+  if(!disponivel || vagasOcupadas>=vagasMax){
     cbox.style.display='block';
     cbox.className='info-box danger';
-    cbox.innerHTML='🅿 Horário Lotado — todas as '+vagasMax+' vaga(s) ocupadas: '
-      +agendNoHorario.map(a=>'<strong>'+cliNome(a.cliente_id)+'</strong> ('+fmtTime(a.data_hora_inicio)+'–'+fmtTime(a.data_hora_fim)+')').join(', ');
+    cbox.innerHTML='🅿 Horário Lotado — todas as '+vagasMax+' vaga(s) ocupadas.';
   } else if(vagasOcupadas>0){
-    // Há vagas mas algumas ocupadas — aviso informativo
     cbox.style.display='block';
     cbox.className='info-box warn';
-    cbox.innerHTML='🅿 '+vagasLivres+' vaga(s) disponível(is) neste horário de '+vagasMax+'. Ocupadas: '
-      +agendNoHorario.map(a=>'<strong>'+cliNome(a.cliente_id)+'</strong>').join(', ');
+    cbox.innerHTML='🅿 '+vagasLivres+' vaga(s) disponível(is) de '+vagasMax+' neste horário.';
   } else {
     cbox.style.display='none';
   }
@@ -3617,7 +3963,7 @@ function calcTotalAgend(){
   document.getElementById('agendTotal').textContent=fmtMoney(total);
 }
 
-function salvarAgendamento(){
+async function salvarAgendamento(){
   const id=document.getElementById('agendId').value;
   const cid=document.getElementById('agendClienteId').value;
   const dt=document.getElementById('agendData').value;
@@ -3632,18 +3978,27 @@ function salvarAgendamento(){
   const totalMin=servObjs.reduce((t,s)=>t+(s.tempo_estimado_min||0),0);
   const di=new Date(dt+'T'+hr);
   const df=new Date(di.getTime()+(totalMin||60)*60000);
-  // Verificar vagas disponíveis
-  const cfg=DATA.configuracoes[currentTenant?.id]||{};
-  const vagasMax=cfg.vagas_simultaneas||1;
-  const agendNoHorario=DATA.agendamentos.filter(a=>{
-    if(id&&a.id===id)return false;
-    if(!a.ativo||['cancelado','concluido'].includes(a.status))return false;
-    if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
-    const ai=new Date(a.data_hora_inicio),af=new Date(a.data_hora_fim);
-    return ai<df&&af>di;
-  });
-  if(agendNoHorario.length>=vagasMax){
-    toast('⚠ Sem vagas disponíveis neste horário! ('+vagasMax+' vaga(s) simultânea(s))','error');return;
+  // ── Verificar vagas via RPC Supabase (à prova de bypass) ────
+  if (_sbClient && _sbTenantId) {
+    const vRes = await _sbVerificarVagas(_sbTenantId, di.toISOString(), df.toISOString(), id||null);
+    if (!vRes.disponivel) {
+      toast('🅿 Horário Lotado — todas as '+vRes.vagas_max+' vaga(s) ocupadas neste horário.','error');
+      return;
+    }
+  } else {
+    // Fallback local
+    const cfg=DATA.configuracoes[currentTenant?.id]||{};
+    const vagasMax=cfg.vagas_simultaneas||1;
+    const ocupados=DATA.agendamentos.filter(a=>{
+      if(id&&a.id===id)return false;
+      if(!a.ativo||['cancelado','concluido'].includes(a.status))return false;
+      if(currentTenant&&a.tenant_id!==currentTenant.id)return false;
+      const ai=new Date(a.data_hora_inicio),af=new Date(a.data_hora_fim);
+      return ai<df&&af>di;
+    });
+    if(ocupados.length>=vagasMax){
+      toast('⚠ Sem vagas disponíveis neste horário! ('+vagasMax+' vaga(s))','error');return;
+    }
   }
   const desc=+(document.getElementById('agendDesconto').value)||0;
   const _cfg=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
@@ -3673,9 +4028,28 @@ function salvarAgendamento(){
     leva_traz:document.getElementById('agendLevaTraz').checked,
     valor_total:total,desconto_pct:desc
   };
-  if(id){const i=DATA.agendamentos.findIndex(a=>a.id===id);if(i>=0)Object.assign(DATA.agendamentos[i],dados);}
-  else DATA.agendamentos.push({id:uid(),tenant_id:currentTenant?.id,...dados,status:'agendado',ativo:true,created_at:new Date().toISOString()});
-  salvarDados();closeModal('modalAgendamento');renderAgendamentos();renderAgenda();renderDashboard();toast('Agendamento salvo!');
+  const agId = id || uid();
+  const agFull = {id:agId, tenant_id:currentTenant?.id, ...dados,
+    status: id ? (DATA.agendamentos.find(a=>a.id===id)?.status||'agendado') : 'agendado',
+    ativo: true};
+
+  if (_sbClient && _sbTenantId) {
+    const saved = await _sbUpsert('agendamentos', agFull);
+    if (saved) {
+      const idx=DATA.agendamentos.findIndex(a=>a.id===agId);
+      if(idx>=0) DATA.agendamentos[idx]=saved; else DATA.agendamentos.push(saved);
+    } else {
+      const idx=DATA.agendamentos.findIndex(a=>a.id===agId);
+      if(idx>=0) Object.assign(DATA.agendamentos[idx],agFull); else DATA.agendamentos.push(agFull);
+      salvarDados();
+    }
+  } else {
+    const idx=DATA.agendamentos.findIndex(a=>a.id===agId);
+    if(idx>=0) Object.assign(DATA.agendamentos[idx],agFull); else DATA.agendamentos.push(agFull);
+    salvarDados();
+  }
+  if(_sbTenantId) _sbLogAuditoria(id?'Editou Agendamento':'Novo Agendamento','Agenda','');
+  closeModal('modalAgendamento');renderAgendamentos();renderAgenda();renderDashboard();toast('Agendamento salvo!');
 }
 
 // ===== CLIENTES =====
@@ -3713,16 +4087,54 @@ function editarCliente(id){
   openModal('modalCliente');
 }
 
-function salvarCliente(){
+async function salvarCliente(){
   const id=document.getElementById('clienteId').value;
   const nome=document.getElementById('c_nome').value.trim();
   if(!nome){toast('Nome obrigatório','error');return;}
-  const dados={nome_completo:nome,telefone:document.getElementById('c_telefone').value.trim(),email:document.getElementById('c_email').value.trim(),cpf_cnpj:document.getElementById('c_cpf').value.trim(),data_nascimento:document.getElementById('c_nascimento').value,endereco:{cep:document.getElementById('c_cep').value,logradouro:document.getElementById('c_logradouro').value,numero:document.getElementById('c_numero').value,bairro:document.getElementById('c_bairro').value,cidade:document.getElementById('c_cidade').value,uf:document.getElementById('c_uf').value}};
   const _isNovoC=!id;
-  if(id){const i=DATA.clientes.findIndex(c=>c.id===id);if(i>=0)Object.assign(DATA.clientes[i],dados);}
-  else DATA.clientes.push({id:uid(),tenant_id:currentTenant?.id,...dados,pontos_fidelidade:0,ativo:true,created_at:new Date().toISOString()});
+  const dados={
+    nome_completo: nome,
+    telefone:      document.getElementById('c_telefone').value.trim(),
+    email:         document.getElementById('c_email').value.trim(),
+    cpf_cnpj:      document.getElementById('c_cpf').value.trim(),
+    data_nascimento: document.getElementById('c_nascimento').value||null,
+    cep:           document.getElementById('c_cep').value,
+    logradouro:    document.getElementById('c_logradouro').value,
+    numero:        document.getElementById('c_numero').value,
+    bairro:        document.getElementById('c_bairro').value,
+    cidade:        document.getElementById('c_cidade').value,
+    uf:            document.getElementById('c_uf').value,
+    tenant_id:     currentTenant?.id,
+    ativo:         true
+  };
+  if(id) dados.id = id;
+  else { dados.id = uid(); dados.pontos_fidelidade = 0; }
+
+  // Supabase upsert (sincroniza todos os devices automaticamente via Realtime)
+  if (_sbClient && _sbTenantId) {
+    const sbDados = {...dados};
+    // Remover campos sem coluna direta no banco
+    const saved = await _sbUpsert('clientes', sbDados);
+    if (saved) {
+      // Realtime vai atualizar DATA.clientes automaticamente nos outros devices
+      // Atualizar localmente para feedback imediato
+      const idx = DATA.clientes.findIndex(c=>c.id===dados.id);
+      if(idx>=0) Object.assign(DATA.clientes[idx], saved); else DATA.clientes.push(saved);
+    } else {
+      // Fallback local se Supabase falhar
+      const idx=DATA.clientes.findIndex(c=>c.id===dados.id);
+      if(idx>=0) Object.assign(DATA.clientes[idx],dados); else DATA.clientes.push(dados);
+      salvarDados();
+    }
+  } else {
+    // Sem Supabase — modo offline (localStorage)
+    const idx=DATA.clientes.findIndex(c=>c.id===dados.id);
+    if(idx>=0) Object.assign(DATA.clientes[idx],dados); else DATA.clientes.push(dados);
+    salvarDados();
+  }
   if(typeof logAuditoria==='function')logAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente',dados.nome_completo);
-  salvarDados();closeModal('modalCliente');renderClientes();renderDashboard();toast('Cliente salvo!');
+  if(_sbTenantId) _sbLogAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente','Clientes',dados.nome_completo);
+  closeModal('modalCliente');renderClientes();renderDashboard();toast('Cliente salvo!');
   // Se veio do agendamento, retornar e preencher cliente
   if(window._voltarAgendDepoisCliente){
     window._voltarAgendDepoisCliente=false;
@@ -3739,7 +4151,7 @@ function salvarCliente(){
   }
 }
 
-function excluirCliente(id){if(!confirm('Desativar este cliente?'))return;const i=DATA.clientes.findIndex(c=>c.id===id);if(i>=0){DATA.clientes[i].ativo=false;salvarDados();renderClientes();toast('Cliente desativado');}}
+function excluirCliente(id){if(!confirm('Desativar este cliente?'))return;const i=DATA.clientes.findIndex(c=>c.id===id);if(i>=0){DATA.clientes[i].ativo=false;if(_sbClient&&_sbTenantId)_sbSoftDelete('clientes',id);else salvarDados();renderClientes();toast('Cliente desativado');}}
 
 // ===== SERVIÇOS =====
 function renderServicos(){
@@ -3779,12 +4191,23 @@ function salvarServico(){
   const valor=parseFloat(document.getElementById('s_valor').value)||0;
   if(!nome||!tempo||!valor){toast('Preencha nome, tempo e valor','error');return;}
   const dados={nome,descricao:document.getElementById('s_descricao').value.trim(),tempo_estimado_min:tempo,preco_base:valor,pontos_fidelidade:parseInt(document.getElementById('s_pontos').value)||0,valor_km:parseFloat(document.getElementById('s_valorKm').value)||0,leva_traz:document.getElementById('s_levaTraz').checked};
-  if(id){const i=DATA.servicos.findIndex(s=>s.id===id);if(i>=0)Object.assign(DATA.servicos[i],dados);}
-  else DATA.servicos.push({id:uid(),tenant_id:currentTenant?.id,...dados,ativo:true});
-  salvarDados();closeModal('modalServico');renderServicos();toast('Serviço salvo!');
+  const sId=id||uid();
+  const sFull={id:sId,tenant_id:currentTenant?.id,...dados,ativo:true};
+  if(_sbClient&&_sbTenantId){
+    _sbUpsert('servicos',sFull).then(function(saved){
+      const i=DATA.servicos.findIndex(s=>s.id===sId);
+      if(saved){if(i>=0)DATA.servicos[i]=saved;else DATA.servicos.push(saved);}
+      else{if(i>=0)Object.assign(DATA.servicos[i],sFull);else DATA.servicos.push(sFull);salvarDados();}
+    });
+  } else {
+    const i=DATA.servicos.findIndex(s=>s.id===sId);
+    if(i>=0)Object.assign(DATA.servicos[i],sFull);else DATA.servicos.push(sFull);
+    salvarDados();
+  }
+  closeModal('modalServico');renderServicos();toast('Serviço salvo!');
 }
 
-function excluirServico(id){if(!confirm('Excluir serviço?'))return;const i=DATA.servicos.findIndex(s=>s.id===id);if(i>=0){DATA.servicos[i].ativo=false;salvarDados();renderServicos();toast('Serviço removido');}}
+function excluirServico(id){if(!confirm('Excluir serviço?'))return;const i=DATA.servicos.findIndex(s=>s.id===id);if(i>=0){DATA.servicos[i].ativo=false;if(_sbClient&&_sbTenantId)_sbSoftDelete('servicos',id);else salvarDados();renderServicos();toast('Serviço removido');}}
 
 // ===== ESTOQUE =====
 function renderEstoque(){
@@ -3850,9 +4273,20 @@ function salvarProduto(){
   const qtdEmb=parseFloat(document.getElementById('p_qtdEmb').value)||1;
   const embs=parseFloat(document.getElementById('p_embalagens').value)||0;
   const dados={nome,categoria:document.getElementById('p_categoria').value||null,unidade:document.getElementById('p_unidade').value,quantidade_por_embalagem:qtdEmb,quantidade_embalagens:embs,quantidade_atual:qtdEmb*embs,quantidade_minima:parseFloat(document.getElementById('p_qtdMin').value)||0,custo_por_embalagem:parseFloat(document.getElementById('p_custoEmb').value)||0};
-  if(id){const i=DATA.produtos.findIndex(p=>p.id===id);if(i>=0)Object.assign(DATA.produtos[i],dados);}
-  else DATA.produtos.push({id:uid(),tenant_id:currentTenant?.id,...dados,ativo:true});
-  salvarDados();closeModal('modalProduto');renderEstoque();renderDashboard();toast('Produto salvo!');
+  const pId=id||uid();
+  const pFull={id:pId,tenant_id:currentTenant?.id,...dados,ativo:true};
+  if(_sbClient&&_sbTenantId){
+    _sbUpsert('produtos',pFull).then(function(saved){
+      const i=DATA.produtos.findIndex(p=>p.id===pId);
+      if(saved){if(i>=0)DATA.produtos[i]=saved;else DATA.produtos.push(saved);}
+      else{if(i>=0)Object.assign(DATA.produtos[i],pFull);else DATA.produtos.push(pFull);salvarDados();}
+    });
+  } else {
+    const i=DATA.produtos.findIndex(p=>p.id===pId);
+    if(i>=0)Object.assign(DATA.produtos[i],pFull);else DATA.produtos.push(pFull);
+    salvarDados();
+  }
+  closeModal('modalProduto');renderEstoque();renderDashboard();toast('Produto salvo!');
 }
 
 function abrirMovEstoque(pid){
@@ -3875,11 +4309,21 @@ function salvarMovEstoque(){
     if(tipo==='entrada')DATA.produtos[i].quantidade_atual+=qtd;
     else DATA.produtos[i].quantidade_atual=Math.max(0,DATA.produtos[i].quantidade_atual-qtd);
     DATA.produtos[i].quantidade_embalagens=DATA.produtos[i].quantidade_atual/(DATA.produtos[i].quantidade_por_embalagem||1);
+    // Persistir estoque atualizado
+    if(_sbClient&&_sbTenantId){
+      _sbUpsert('produtos',{id:pid,tenant_id:currentTenant?.id,
+        quantidade_atual:DATA.produtos[i].quantidade_atual,
+        quantidade_embalagens:DATA.produtos[i].quantidade_embalagens});
+      _sbClient.from('movimentacoes_estoque').insert({
+        id:uid(),tenant_id:currentTenant?.id,produto_id:pid,tipo,quantidade:qtd,
+        motivo:document.getElementById('movMotivo').value
+      }).then(function(){});
+    } else { salvarDados(); }
   }
-  salvarDados();closeModal('modalMovEstoque');renderEstoque();renderDashboard();toast('Estoque atualizado!');
+  closeModal('modalMovEstoque');renderEstoque();renderDashboard();toast('Estoque atualizado!');
 }
 
-function excluirProduto(id){if(!confirm('Excluir produto?'))return;const i=DATA.produtos.findIndex(p=>p.id===id);if(i>=0){DATA.produtos[i].ativo=false;salvarDados();renderEstoque();toast('Produto removido');}}
+function excluirProduto(id){if(!confirm('Excluir produto?'))return;const i=DATA.produtos.findIndex(p=>p.id===id);if(i>=0){DATA.produtos[i].ativo=false;if(_sbClient&&_sbTenantId)_sbSoftDelete('produtos',id);else salvarDados();renderEstoque();toast('Produto removido');}}
 
 // ===== FICHA TÉCNICA =====
 function renderFichas(){
@@ -4063,9 +4507,20 @@ function salvarRegra(){
   if(!nome||!pontos){toast('Preencha nome e pontos','error');return;}
   const id=document.getElementById('regraId').value;
   const dados={nome,descricao:document.getElementById('r_desc').value,pontos,tipo:document.getElementById('r_tipo').value,valor:document.getElementById('r_valor').value,ativo:true};
-  if(id){const i=DATA.regras_fidelidade.findIndex(r=>r.id===id);if(i>=0)Object.assign(DATA.regras_fidelidade[i],dados);}
-  else DATA.regras_fidelidade.push({id:uid(),tenant_id:currentTenant?.id,...dados});
-  salvarDados();closeModal('modalRegra');renderFidelidade();atualizarFidAlerts();toast('Regra salva!');
+  const rId=id||uid();
+  const rFull={id:rId,tenant_id:currentTenant?.id,...dados};
+  if(_sbClient&&_sbTenantId){
+    _sbUpsert('regras_fidelidade',rFull).then(function(saved){
+      const i=DATA.regras_fidelidade.findIndex(r=>r.id===rId);
+      if(saved){if(i>=0)DATA.regras_fidelidade[i]=saved;else DATA.regras_fidelidade.push(saved);}
+      else{if(i>=0)Object.assign(DATA.regras_fidelidade[i],rFull);else DATA.regras_fidelidade.push(rFull);salvarDados();}
+    });
+  } else {
+    const i=DATA.regras_fidelidade.findIndex(r=>r.id===rId);
+    if(i>=0)Object.assign(DATA.regras_fidelidade[i],rFull);else DATA.regras_fidelidade.push(rFull);
+    salvarDados();
+  }
+  closeModal('modalRegra');renderFidelidade();atualizarFidAlerts();toast('Regra salva!');
 }
 
 function excluirRegra(id){if(!confirm('Excluir esta regra?'))return;const i=DATA.regras_fidelidade.findIndex(r=>r.id===id);if(i>=0){DATA.regras_fidelidade.splice(i,1);salvarDados();renderFidelidade();}}
@@ -5109,11 +5564,23 @@ function salvarMovFinanceiro(){
   const desc=document.getElementById('fin_desc').value.trim();
   if(!valor||!desc){toast('Preencha valor e descrição','error');return;}
   const dados={tipo,valor,descricao:desc,data:document.getElementById('fin_data').value,categoria:document.getElementById('fin_cat').value,forma:document.getElementById('fin_forma').value,observacao:document.getElementById('fin_obs').value,usuario:currentUser?.nome,usuario_id:currentUser?.id,tenant_id:currentTenant?.id};
-  if(id){
-    const i=DATA.movimentacoes_fin.findIndex(m=>m.id===id);
-    if(i>=0){const antigo=DATA.movimentacoes_fin[i];logAuditoria('Editou Movimentação','De: '+fmtMoney(antigo.valor)+' → '+fmtMoney(valor));Object.assign(DATA.movimentacoes_fin[i],dados);}
-  }else{DATA.movimentacoes_fin.push({id:uid(),...dados,created_at:new Date().toISOString()});logAuditoria('Registrou '+tipo,'R$ '+valor+' — '+desc);}
-  salvarDados();closeModal('modalMovFinanceiro');renderFinanceiro();toast('Movimentação salva!');
+  const mId=id||uid();
+  const mFull={id:mId,...dados,criado_em:new Date().toISOString()};
+  if(_sbClient&&_sbTenantId){
+    _sbUpsert('movimentacoes_financeiras',{
+      id:mId,tenant_id:currentTenant?.id,tipo,valor,descricao:desc,
+      categoria:dados.categoria,forma_pagamento:dados.forma,
+      criado_em:mFull.criado_em
+    }).then(function(saved){
+      if(!id){DATA.movimentacoes_fin.push(mFull);}
+      else{const i=DATA.movimentacoes_fin.findIndex(m=>m.id===id);if(i>=0)Object.assign(DATA.movimentacoes_fin[i],dados);}
+    });
+  } else {
+    if(id){const i=DATA.movimentacoes_fin.findIndex(m=>m.id===id);if(i>=0){const antigo=DATA.movimentacoes_fin[i];logAuditoria('Editou Movimentação','De: '+fmtMoney(antigo.valor)+' → '+fmtMoney(valor));Object.assign(DATA.movimentacoes_fin[i],dados);}}
+    else{DATA.movimentacoes_fin.push({id:mId,...dados,created_at:new Date().toISOString()});logAuditoria('Registrou '+tipo,'R$ '+valor+' — '+desc);}
+    salvarDados();
+  }
+  closeModal('modalMovFinanceiro');renderFinanceiro();toast('Movimentação salva!');
 }
 function excluirMovFin(id){
   const m=DATA.movimentacoes_fin.find(x=>x.id===id);
@@ -5604,7 +6071,17 @@ function salvarEmpresaAdminCompleto(){
   if(cfgCep)cfgCep.value=cepBase;
   if(cfgVkm)cfgVkm.value=vkm||'';
   salvarDados();
-  logAuditoria('Salvou Config Empresa','CEP:'+cepBase+' | R$'+vkm+'/km');
+  // Persistir vagas_por_horario no Supabase (tenant)
+  if(_sbClient&&_sbTenantId){
+    var vagasConf = DATA.configuracoes[tid]?.vagas_simultaneas || 1;
+    _sbClient.from('tenants').update({
+      vagas_por_horario: vagasConf,
+      config: DATA.configuracoes[tid] || {}
+    }).eq('id',_sbTenantId).then(function(res){
+      if(res.error) console.warn('[GBR SB] salvarEmpresa tenant:', res.error.message);
+    });
+  }
+  logAuditoria('Salvou Config Empresa','CEP:'+cepBase+' | R$'+vkm+'/km | Vagas:'+( DATA.configuracoes[tid]?.vagas_simultaneas||1));
   toast('✅ Dados da empresa e Leva e Traz salvos!','success');
 }
 
