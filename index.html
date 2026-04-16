@@ -9,13 +9,8 @@
 <meta name="apple-mobile-web-app-title" content="GBR Pro">
 <meta name="mobile-web-app-capable" content="yes">
 <title>GBR Sistemas v5.0 — Gestão para Estéticas Automotivas</title>
-<!-- ══ Firebase SDK — Integração com Console de Licenciamento ══ -->
-<!-- Supabase SDK (sync multi-device + RLS) -->
+<!-- Supabase SDK — Fonte única de verdade -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<!-- Firebase SDK (licenciamento / Console legado) -->
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&family=Bebas+Neue&display=swap');
 
@@ -1928,899 +1923,364 @@ function _gbrModalUpgrade(pageId) {
 }
 
 
-// ════════════════════════════════════════════════════════════════
-//  GBR FIREBASE SYNC ENGINE
-//  Resolve: dados criados no mobile não aparecem no desktop
-//
-//  Causa raiz: o sistema usava APENAS localStorage, que é
-//  isolado por dispositivo/browser. Dados de um usuário não
-//  chegavam ao outro mesmo sendo da mesma estética.
-//
-//  Solução: Firebase Realtime Database como fonte única de
-//  verdade para todos os dados operacionais do tenant.
-// ════════════════════════════════════════════════════════════════
 
-var _gbrSyncAtivo = false;
-var _gbrSyncListeners = {};
-// Chaves operacionais que devem ser sincronizadas via Firebase
-var _GBR_SYNC_KEYS = [
-  'clientes','agendamentos','servicos','produtos',
-  'fichas','checklists','caixas','movimentacoes',
-  'regras_fidelidade','resgates_fidelidade',
-  'nps_avaliacoes','wa_templates','wa_historico',
-  'movimentacoes_fin','auditoria','configuracoes','permissoes'
-];
+// ══════════════════════════════════════════════════════════════════════
+//  GBR SUPABASE CORE  v3.0
+//  Firebase 100% removido. Fonte única de verdade: Supabase.
+// ══════════════════════════════════════════════════════════════════════
 
-// ── Atualiza indicador visual de sync na topbar ─────────────────
+var GBR_SB_URL  = 'https://ogzqgnatdtxyeytrdizb.supabase.co';
+var GBR_SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5YWtndm52cHNzc2pkZXdrZ2NpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNTk5NTksImV4cCI6MjA5MTkzNTk1OX0.faLipxolBoB6LjfrdvpQkra6_zGIkmlZf8a6iuPTUF0';
+
+var _sb          = null;
+var _sbTenantId  = null;
+var _sbUserId    = null;
+var _sbUserEmail = null;
+var _sbChannels  = [];
+var _sbReady     = false;
+
+(function() {
+  try {
+    if (typeof supabase === 'undefined') { console.error('[GBR SB] SDK nao carregado!'); return; }
+    _sb = supabase.createClient(GBR_SB_URL, GBR_SB_ANON, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+      realtime: { params: { eventsPerSecond: 20 } }
+    });
+    _sbReady = true;
+    console.log('[GBR SB] Supabase inicializado.');
+  } catch(e) { console.error('[GBR SB] init:', e.message); }
+})();
+
 function _gbrAtualizarIndicadorSync(estado, txt) {
   var el = document.getElementById('gbrSyncIndicator');
   var txEl = document.getElementById('gbrSyncTxt');
-  if (!el) return;
-  el.className = 'sync-' + estado;
+  if (el)   el.className = 'sync-' + estado;
   if (txEl) txEl.textContent = txt || estado;
 }
 
-// ── Converte objeto Firebase de volta para array se necessário ──
-function _gbrFbParaArray(val) {
-  if (val === null || val === undefined) return val;
-  if (Array.isArray(val)) return val;
-  if (typeof val !== 'object') return val;
-  var keys = Object.keys(val);
-  if (keys.length === 0) return [];
-  // Array-like: todas as chaves são números sequenciais
-  var todosNumericos = keys.every(function(k) { return !isNaN(parseInt(k)); });
-  if (todosNumericos) return Object.values(val);
-  return val; // objeto real (ex: configuracoes)
-}
-
-// ── Ativa o sync Firebase para o tenant logado ──────────────────
-function _gbrAtivarSync(tenantId) {
-  if (!_gbrFbDb || !tenantId || _gbrSyncAtivo) return;
-  _gbrSyncAtivo = true;
-  _gbrAtualizarIndicadorSync('saving', 'Sincronizando...');
-  console.log('[GBR Sync] Firebase sync ativado para tenant:', tenantId);
-
-  var ref = _gbrFbDb.ref('dados_operacionais/' + tenantId);
-
-  if (_gbrSyncListeners._main) {
-    try { _gbrSyncListeners._main.off(); } catch(e) {}
-  }
-
-  _gbrSyncListeners._main = ref;
-  var _primeiraLeitura = true;
-
-  ref.on('value', function(snap) {
-    var dadosFirebase = snap.val();
-
-    if (!dadosFirebase) {
-      // Primeira vez no Firebase — migrar dados locais
-      _gbrEnviarLocalStorageParaFirebase(tenantId);
-      _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
-      _primeiraLeitura = false;
-      return;
-    }
-
-    var houveMudanca = false;
-    _GBR_SYNC_KEYS.forEach(function(chave) {
-      if (dadosFirebase[chave] !== undefined) {
-        var dadoFb = _gbrFbParaArray(dadosFirebase[chave]);
-        // Comparação profunda para detectar mudanças reais
-        if (JSON.stringify(DATA[chave]) !== JSON.stringify(dadoFb)) {
-          DATA[chave] = dadoFb;
-          houveMudanca = true;
-        }
-      }
-    });
-
-    if (houveMudanca || _primeiraLeitura) {
-      // Cache local
-      _GBR_SYNC_KEYS.forEach(function(k) {
-        try { localStorage.setItem('gbr_' + k, JSON.stringify(DATA[k])); } catch(e) {}
-      });
-      if (!_primeiraLeitura) {
-        // Mudança externa detectada — re-renderiza sem piscar
-        _gbrAtualizarIndicadorSync('saving', 'Atualizando...');
-        setTimeout(function() {
-          _gbrReRenderPaginaAtiva();
-          _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
-        }, 200);
-      } else {
-        _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
-      }
-    } else {
-      _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
-    }
-    _primeiraLeitura = false;
-
-  }, function(err) {
-    console.warn('[GBR Sync] Erro no listener:', err.message);
-    _gbrSyncAtivo = false;
-    if (err.code === 'PERMISSION_DENIED') {
-      // Regras do Firebase não incluem dados_operacionais ainda
-      // Mostrar aviso admin com instrução para atualizar as regras
-      _gbrAtualizarIndicadorSync('off', 'Sem permissão');
-      console.warn('[GBR Sync] ATENÇÃO: Adicione o nó "dados_operacionais" nas Regras do Firebase (Console > Firebase API > Regras). Use o template "GBR Padrão".');
-      // Toast apenas para owner/admin
-      if (currentUser && ['woner','owner','admin','superadmin'].includes(currentUser.role)) {
-        setTimeout(function() {
-          toast('⚠ Sync desativado: atualize as Regras do Firebase no Console (Template GBR Padrão).', 'warn');
-        }, 2000);
-      }
-    } else {
-      _gbrAtualizarIndicadorSync('off', 'Offline');
-    }
-  });
-}
-
-// ── Envia dados do localStorage para o Firebase (migração inicial) ──
-function _gbrEnviarLocalStorageParaFirebase(tenantId) {
-  if (!_gbrFbDb || !tenantId) return;
-  var updates = {};
-  var temDados = false;
-
-  _GBR_SYNC_KEYS.forEach(function(chave) {
-    var val = DATA[chave];
-    if (val !== undefined && val !== null) {
-      // Arrays vazios não precisam subir
-      if (Array.isArray(val) && val.length === 0) return;
-      if (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0) return;
-      updates[chave] = val;
-      temDados = true;
-    }
-  });
-
-  if (temDados) {
-    _gbrFbDb.ref('dados_operacionais/' + tenantId).update(updates)
-      .then(function() {
-        console.log('[GBR Sync] Dados locais enviados ao Firebase.');
-      })
-      .catch(function(e) {
-        console.warn('[GBR Sync] Erro ao enviar dados iniciais:', e.message);
-      });
-  }
-}
-
-// ── Salva UMA chave específica no Firebase ──────────────────────
-function _gbrSyncSalvar(chave, valor, tenantId) {
-  tenantId = tenantId || (currentTenant && currentTenant.id);
-  if (!_gbrFbDb || !tenantId || !_gbrSyncAtivo) return;
-  _gbrFbDb.ref('dados_operacionais/' + tenantId + '/' + chave)
-    .set(valor)
-    .catch(function(e) {
-      console.warn('[GBR Sync] Erro ao salvar ' + chave + ':', e.message);
-    });
-}
-
-// ── Re-renderiza a página ativa sem perder o estado ─────────────
 function _gbrReRenderPaginaAtiva() {
   try {
-    var pgAtiva = document.querySelector('.page.active');
-    if (!pgAtiva) return;
-    var pgId = pgAtiva.id; // ex: 'pg-clientes'
-    var nome = pgId.replace('pg-', ''); // ex: 'clientes'
-    var renders = {
-      clientes:      typeof renderClientes      === 'function' ? renderClientes      : null,
-      agendamentos:  typeof renderAgendamentos  === 'function' ? renderAgendamentos  : null,
-      agenda:        typeof renderAgenda        === 'function' ? renderAgenda        : null,
-      servicos:      typeof renderServicos      === 'function' ? renderServicos      : null,
-      estoque:       typeof renderEstoque       === 'function' ? renderEstoque       : null,
-      caixa:         typeof renderCaixa         === 'function' ? renderCaixa         : null,
-      fidelidade:    typeof renderFidelidade    === 'function' ? renderFidelidade    : null,
-      relatorios:    typeof renderRelatorios    === 'function' ? renderRelatorios    : null,
-      financeiro:    typeof renderFinanceiro    === 'function' ? renderFinanceiro    : null,
-      dashboard:     typeof renderDashboard     === 'function' ? renderDashboard     : null,
-      fichas:        typeof renderFichas        === 'function' ? renderFichas        : null,
-      checklist:     typeof renderChecklists    === 'function' ? renderChecklists    : null,
-      whatsapp:      typeof renderWhatsapp      === 'function' ? renderWhatsapp      : null,
+    var pg = document.querySelector('.page.active');
+    if (!pg) return;
+    var nome = pg.id.replace('pg-', '');
+    var map = {
+      clientes:'renderClientes', servicos:'renderServicos',
+      agendamentos:'renderAgendamentos', agenda:'renderAgenda',
+      'agenda-semana':'renderAgendaSemana',
+      estoque:'renderEstoque', caixa:'renderCaixa',
+      fidelidade:'renderFidelidade', relatorios:'renderRelatorios',
+      financeiro:'renderFinanceiro', dashboard:'renderDashboard',
+      fichas:'renderFichas', checklist:'renderChecklists', whatsapp:'renderWhatsapp'
     };
-    if (renders[nome]) renders[nome]();
-  } catch(e) {
-    console.warn('[GBR Sync] ReRender falhou:', e.message);
-  }
+    var fn = map[nome];
+    if (fn && typeof window[fn] === 'function') window[fn]();
+  } catch(e) { console.warn('[GBR RT] ReRender:', e.message); }
 }
 
-// ── Desativa sync ao fazer logout ───────────────────────────────
-function _gbrDesativarSync() {
-  if (_gbrSyncListeners._main) {
-    try { _gbrSyncListeners._main.off(); } catch(e) {}
-  }
-  _gbrSyncAtivo = false;
-  _gbrSyncListeners = {};
-}
-
-
-// ══════════════════════════════════════════════════════════════════
-//  GBR SUPABASE ADAPTER  v2.0
-//  Substitui localStorage-only por Supabase como fonte única de
-//  verdade. Resolve: dados criados no mobile não aparecem no desktop.
-//
-//  Credenciais do projeto GBRsistemassa:
-//    Project ID : ogzqgnatdtxyeytrdizb
-//    URL        : https://ogzqgnatdtxyeytrdizb.supabase.co
-//
-//  NOTA: A anon key abaixo é segura para uso no browser com RLS ativo.
-//  Cada usuário só acessa dados do seu próprio tenant (policy no banco).
-// ══════════════════════════════════════════════════════════════════
-
-var _sbClient  = null;  // cliente Supabase
-var _sbTenantId = null; // tenant_id do usuário logado
-var _sbUserId   = null; // auth.uid() do Supabase
-var _sbChannels = [];   // channels de realtime ativos
-var _sbSyncOk   = false;
-
-// Configuração Supabase
-var GBR_SB_URL  = 'https://ogzqgnatdtxyeytrdizb.supabase.co';
-var GBR_SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nenFnbmF0ZHR4eWV5dHJkaXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ4MjU4NTQsImV4cCI6MjA2MDQwMTg1NH0.placeholder_replace_with_real_key';
-
-// Mapeamento tabela Supabase ↔ chave DATA local
-var _GBR_TABLE_MAP = {
-  clientes:               'clientes',
-  servicos:               'servicos',
-  agendamentos:           'agendamentos',
-  produtos:               'produtos',
-  movimentacoes_estoque:  'movimentacoes',
-  caixas:                 'caixas',
-  movimentacoes_financeiras: 'movimentacoes_fin',
-  regras_fidelidade:      'regras_fidelidade',
-  fichas_tecnicas:        'fichas',
-  checklists:             'checklists'
-};
-
-// ── Inicializar Supabase Client ──────────────────────────────────
-function _sbInit() {
-  try {
-    if (typeof supabase === 'undefined' || !supabase.createClient) {
-      console.warn('[GBR SB] SDK Supabase não carregado.');
-      return false;
+function _gbrAplicarPaywall() {
+  var libs = window._gbrModulosLiberados;
+  if (!libs || !Array.isArray(libs)) return;
+  document.querySelectorAll('.nav-item[onclick]').forEach(function(item) {
+    var m = (item.getAttribute('onclick')||'').match(/showPage\(['"](.*?)['"]/);
+    if (!m) return;
+    var slug = (_GBR_MODULO_MAP||{})[m[1]];
+    if (!slug) return;
+    var old = item.querySelector('.gbr-lock-icon');
+    if (old) old.remove();
+    item.classList.remove('locked-module');
+    if (libs.indexOf(slug) === -1) {
+      item.classList.add('locked-module');
+      var lk = document.createElement('span');
+      lk.className = 'gbr-lock-icon';
+      lk.style.cssText = 'margin-left:auto;font-size:12px;opacity:.7;flex-shrink:0';
+      lk.textContent = '\uD83D\uDD12';
+      item.appendChild(lk);
     }
-    _sbClient = supabase.createClient(GBR_SB_URL, GBR_SB_ANON, {
-      auth: { persistSession: true, autoRefreshToken: true },
-      realtime: { params: { eventsPerSecond: 10 } }
-    });
-    console.log('[GBR SB] Cliente Supabase inicializado.');
-    return true;
-  } catch(e) {
-    console.warn('[GBR SB] Erro ao inicializar:', e.message);
-    return false;
-  }
+  });
 }
 
-// ── Login no Supabase com email/senha ────────────────────────────
-async function _sbLogin(email, senha) {
-  if (!_sbClient) return null;
-  try {
-    var res = await _sbClient.auth.signInWithPassword({ email, password: senha });
-    if (res.error) {
-      console.warn('[GBR SB] Login falhou:', res.error.message);
-      return null;
-    }
-    _sbUserId = res.data.user.id;
-    console.log('[GBR SB] Login Supabase OK:', email);
-    return res.data;
-  } catch(e) {
-    console.warn('[GBR SB] Exceção no login:', e.message);
-    return null;
-  }
-}
-
-// ── Carregar TODOS os dados do tenant do Supabase ────────────────
-async function _sbCarregarDados(tenantId) {
-  if (!_sbClient || !tenantId) return false;
+async function _sbCarregarTudo(tenantId) {
+  if (!_sbReady || !tenantId) return false;
   _gbrAtualizarIndicadorSync('saving', 'Carregando...');
   try {
-    // Carregar todas as tabelas em paralelo
-    var queries = Object.keys(_GBR_TABLE_MAP).map(async function(tabela) {
-      var chave = _GBR_TABLE_MAP[tabela];
-      var { data, error } = await _sbClient
-        .from(tabela)
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('criado_em', { ascending: true });
-      if (error) {
-        console.warn('[GBR SB] Erro ao carregar ' + tabela + ':', error.message);
-        return;
-      }
-      DATA[chave] = data || [];
-      // Atualizar cache local
-      try { localStorage.setItem('gbr_' + chave, JSON.stringify(DATA[chave])); } catch(e) {}
+    var res = await _sb.from('tenants').select('*').eq('id', tenantId).single();
+    if (res.error) throw res.error;
+    var t = res.data;
+    if (t.kill_switch === true || t.status_licenca === 'inativo') {
+      showLoginMsg('Acesso bloqueado. Contate o suporte.', 'erro'); return false;
+    }
+    if (t.expiracao && new Date(t.expiracao) < new Date()) {
+      showLoginMsg('Licenca expirada em ' + new Date(t.expiracao).toLocaleDateString('pt-BR') + '.', 'erro'); return false;
+    }
+    if (!DATA.configuracoes) DATA.configuracoes = {};
+    DATA.configuracoes[tenantId] = Object.assign(DATA.configuracoes[tenantId]||{}, t.config||{}, {
+      vagas_simultaneas: t.vagas_por_horario || 1,
+      wa_config: t.wa_config || {}
     });
+    if (t.max_vagas)           window._gbrMaxVagas        = t.max_vagas;
+    if (t.max_colaboradores)   window._gbrMaxColaboradores = t.max_colaboradores;
+    if (t.modulos_liberados)   window._gbrModulosLiberados = t.modulos_liberados;
+    if (t.nome_exibicao_plano) window._gbrNomePlano        = t.nome_exibicao_plano;
 
-    // Carregar config do tenant
-    queries.push((async function() {
-      var { data } = await _sbClient
-        .from('tenants')
-        .select('config, aparencia, vagas_por_horario, max_vagas, modulos_liberados, nome_exibicao_plano, wa_config')
-        .eq('id', tenantId)
-        .single();
-      if (data) {
-        // Aplicar config local
-        if (!DATA.configuracoes) DATA.configuracoes = {};
-        DATA.configuracoes[tenantId] = Object.assign(
-          DATA.configuracoes[tenantId] || {},
-          data.config || {},
-          { vagas_simultaneas: data.vagas_por_horario || 1,
-            wa_config: data.wa_config || {} }
-        );
-        // Atualizar limites do plano em tempo real
-        if (data.max_vagas)           window._gbrMaxVagas = data.max_vagas;
-        if (data.modulos_liberados)   window._gbrModulosLiberados = data.modulos_liberados;
-        if (data.nome_exibicao_plano) window._gbrNomePlano = data.nome_exibicao_plano;
-        _gbrAplicarPaywall();
-      }
-    })());
-
-    await Promise.all(queries);
-    _sbSyncOk = true;
+    var tabelas = [
+      ['clientes','clientes'], ['servicos','servicos'],
+      ['agendamentos','agendamentos'], ['produtos','produtos'],
+      ['caixas','caixas'], ['movimentacoes_financeiras','movimentacoes_fin'],
+      ['regras_fidelidade','regras_fidelidade'], ['fichas_tecnicas','fichas'],
+      ['checklists','checklists'], ['movimentacoes_estoque','movimentacoes']
+    ];
+    await Promise.all(tabelas.map(async function(cfg) {
+      var r = await _sb.from(cfg[0]).select('*').eq('tenant_id', tenantId).order('criado_em', { ascending: true });
+      if (r.error) { console.warn('[GBR SB] ' + cfg[0] + ':', r.error.message); return; }
+      DATA[cfg[1]] = r.data || [];
+      try { localStorage.setItem('gbr_' + cfg[1], JSON.stringify(DATA[cfg[1]])); } catch(e) {}
+    }));
     _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
-    console.log('[GBR SB] Dados carregados do Supabase.');
-    return true;
+    console.log('[GBR SB] Dados carregados.');
+    return t;
   } catch(e) {
-    console.warn('[GBR SB] Erro ao carregar dados:', e.message);
-    _gbrAtualizarIndicadorSync('off', 'Erro sync');
+    console.warn('[GBR SB] Erro carga:', e.message);
+    _gbrAtualizarIndicadorSync('off', 'Erro');
     return false;
   }
 }
 
-// ── Ativar Realtime Subscriptions ────────────────────────────────
-// Escuta mudanças em tempo real — quando QUALQUER dispositivo
-// salvar um dado, todos os outros são notificados automaticamente.
 function _sbAtivarRealtime(tenantId) {
-  if (!_sbClient || !tenantId) return;
-  // Encerrar channels anteriores
-  _sbChannels.forEach(function(ch) { try { _sbClient.removeChannel(ch); } catch(e) {} });
+  if (!_sbReady || !tenantId) return;
+  _sbChannels.forEach(function(ch) { try { _sb.removeChannel(ch); } catch(e) {} });
   _sbChannels = [];
-
-  // Tabelas que têm realtime habilitado
-  var tabelasRealtime = [
-    'agendamentos', 'clientes', 'servicos', 'produtos',
-    'caixas', 'movimentacoes_financeiras', 'regras_fidelidade', 'checklists'
+  var tabelas = [
+    ['agendamentos','agendamentos'], ['clientes','clientes'],
+    ['servicos','servicos'], ['produtos','produtos'],
+    ['caixas','caixas'], ['movimentacoes_financeiras','movimentacoes_fin'],
+    ['regras_fidelidade','regras_fidelidade'], ['checklists','checklists']
   ];
-
-  tabelasRealtime.forEach(function(tabela) {
-    var chave = _GBR_TABLE_MAP[tabela];
-    var channel = _sbClient
-      .channel('gbr_' + tabela + '_' + tenantId)
+  tabelas.forEach(function(cfg) {
+    var ch = _sb.channel('gbr_' + cfg[0] + '_' + tenantId)
       .on('postgres_changes', {
-        event: '*',        // INSERT, UPDATE, DELETE
-        schema: 'public',
-        table: tabela,
+        event: '*', schema: 'public', table: cfg[0],
         filter: 'tenant_id=eq.' + tenantId
-      }, function(payload) {
-        console.log('[GBR Realtime] ' + tabela + ' ' + payload.eventType);
-        _sbHandleRealtimeChange(tabela, chave, payload);
-      })
-      .subscribe(function(status) {
-        if (status === 'SUBSCRIBED') {
-          console.log('[GBR Realtime] Inscrito em:', tabela);
-        }
-      });
-    _sbChannels.push(channel);
+      }, function(payload) { _sbHandleChange(cfg[1], payload); })
+      .subscribe(function(s) { if (s === 'SUBSCRIBED') console.log('[GBR RT] ' + cfg[0] + ' OK'); });
+    _sbChannels.push(ch);
   });
-
-  // Channel dedicado para mudanças na licença/vagas do tenant
-  var tenantChannel = _sbClient
-    .channel('gbr_tenant_' + tenantId)
+  var tenantCh = _sb.channel('gbr_tenant_' + tenantId)
     .on('postgres_changes', {
-      event: 'UPDATE',
-      schema: 'public',
-      table: 'tenants',
-      filter: 'id=eq.' + tenantId
+      event: 'UPDATE', schema: 'public', table: 'tenants', filter: 'id=eq.' + tenantId
     }, function(payload) {
-      var t = payload.new;
-      if (!t) return;
-      // Kill switch em tempo real
-      if (t.kill_switch === true || t.status_licenca === 'inativo') {
-        var overlay = document.createElement('div');
-        overlay.id = 'gbr-kill-overlay';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.93);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px';
-        overlay.innerHTML = '<div style="font-size:48px">🔒</div>'
-          + '<div style="font-family:sans-serif;font-size:18px;font-weight:700;color:#fff;text-align:center;max-width:420px">🔒 Licença Suspensa/Bloqueada pelo administrador.</div>'
-          + '<div style="font-size:13px;color:#aaa">Você será desconectado em instantes...</div>';
-        if (!document.getElementById('gbr-kill-overlay')) document.body.appendChild(overlay);
-        setTimeout(function() { fazerLogout(); var ol = document.getElementById('gbr-kill-overlay'); if (ol) ol.remove(); }, 3500);
-        return;
+      var t = payload.new; if (!t) return;
+      if (t.kill_switch || t.status_licenca === 'inativo') {
+        var ol = document.createElement('div');
+        ol.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.93);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px';
+        ol.innerHTML = '<div style="font-size:48px">&#x1F512;</div><div style="font-size:18px;font-weight:700;color:#fff">Licensa Suspensa.</div><div style="font-size:13px;color:#aaa">Desconectando...</div>';
+        document.body.appendChild(ol);
+        setTimeout(fazerLogout, 3000); return;
       }
-      // Atualizar limites/módulos em tempo real
-      if (t.max_vagas)           window._gbrMaxVagas = t.max_vagas;
+      if (t.max_vagas)           window._gbrMaxVagas        = t.max_vagas;
       if (t.modulos_liberados)   window._gbrModulosLiberados = t.modulos_liberados;
-      if (t.nome_exibicao_plano) window._gbrNomePlano = t.nome_exibicao_plano;
-      if (t.vagas_por_horario && DATA.configuracoes && tenantId) {
+      if (t.nome_exibicao_plano) window._gbrNomePlano        = t.nome_exibicao_plano;
+      if (t.vagas_por_horario) {
+        if (!DATA.configuracoes) DATA.configuracoes = {};
         if (!DATA.configuracoes[tenantId]) DATA.configuracoes[tenantId] = {};
         DATA.configuracoes[tenantId].vagas_simultaneas = t.vagas_por_horario;
       }
       _gbrAplicarPaywall();
-    })
-    .subscribe();
-  _sbChannels.push(tenantChannel);
-
-  console.log('[GBR Realtime] ' + tabelasRealtime.length + ' subscriptions ativas.');
+    }).subscribe();
+  _sbChannels.push(tenantCh);
+  console.log('[GBR RT] ' + tabelas.length + ' subscriptions ativas.');
 }
 
-// ── Handler de mudança realtime ──────────────────────────────────
-function _sbHandleRealtimeChange(tabela, chaveData, payload) {
-  var arr = DATA[chaveData];
-  if (!Array.isArray(arr)) arr = DATA[chaveData] = [];
-  var novo = payload.new;
-  var id   = novo ? novo.id : (payload.old && payload.old.id);
-
+function _sbHandleChange(chave, payload) {
+  var arr = DATA[chave]; if (!Array.isArray(arr)) arr = DATA[chave] = [];
+  var reg = payload.new; var id = reg ? reg.id : (payload.old && payload.old.id);
   switch(payload.eventType) {
     case 'INSERT':
-      if (novo && !arr.find(function(x) { return x.id === novo.id; })) {
-        arr.push(novo);
-      }
-      break;
+      if (reg && !arr.find(function(x){return x.id===reg.id;})) arr.push(reg); break;
     case 'UPDATE':
-      if (novo) {
-        var idx = arr.findIndex(function(x) { return x.id === novo.id; });
-        if (idx >= 0) arr[idx] = novo; else arr.push(novo);
-      }
-      break;
+      var i = arr.findIndex(function(x){return x.id===reg.id;});
+      if (i >= 0) arr[i] = reg; else arr.push(reg); break;
     case 'DELETE':
-      if (id) {
-        DATA[chaveData] = arr.filter(function(x) { return x.id !== id; });
-      }
-      break;
+      if (id) DATA[chave] = arr.filter(function(x){return x.id!==id;}); break;
   }
-  // Atualizar cache local
-  try { localStorage.setItem('gbr_' + chaveData, JSON.stringify(DATA[chaveData])); } catch(e) {}
-  // Re-renderizar página ativa
+  try { localStorage.setItem('gbr_'+chave, JSON.stringify(DATA[chave])); } catch(e) {}
   _gbrAtualizarIndicadorSync('ok', 'Atualizado');
   _gbrReRenderPaginaAtiva();
 }
 
-// ── Operações CRUD Supabase ──────────────────────────────────────
-
-// UPSERT genérico (insert ou update)
 async function _sbUpsert(tabela, dados) {
-  if (!_sbClient) return null;
-  var { data, error } = await _sbClient.from(tabela).upsert(dados).select().single();
-  if (error) { console.warn('[GBR SB] Upsert ' + tabela + ':', error.message); return null; }
-  return data;
+  if (!_sbReady) return null;
+  var r = await _sb.from(tabela).upsert(dados, {onConflict:'id'}).select().single();
+  if (r.error) { console.warn('[GBR SB] upsert '+tabela+':', r.error.message); return null; }
+  return r.data;
 }
-
-// DELETE (soft: marca ativo=false)
 async function _sbSoftDelete(tabela, id) {
-  if (!_sbClient) return;
-  var { error } = await _sbClient.from(tabela).update({ ativo: false }).eq('id', id);
-  if (error) console.warn('[GBR SB] SoftDelete ' + tabela + ':', error.message);
+  if (!_sbReady) return;
+  var r = await _sb.from(tabela).update({ativo:false}).eq('id',id);
+  if (r.error) console.warn('[GBR SB] softDelete '+tabela+':', r.error.message);
 }
-
-// Verificar vagas disponíveis via RPC (regra no banco, à prova de bypass)
 async function _sbVerificarVagas(tenantId, inicio, fim, excluirId) {
-  if (!_sbClient) return { disponivel: true, vagas_max: 1, ocupados: 0, disponiveis: 1 };
-  var { data, error } = await _sbClient.rpc('verificar_vagas', {
-    p_tenant_id:  tenantId,
-    p_inicio:     inicio,
-    p_fim:        fim,
-    p_excluir_id: excluirId || null
-  });
-  if (error) {
-    console.warn('[GBR SB] verificar_vagas RPC:', error.message);
-    // Fallback local
-    var cfg = DATA.configuracoes && tenantId ? DATA.configuracoes[tenantId] || {} : {};
-    return { disponivel: true, vagas_max: cfg.vagas_simultaneas || 1 };
+  if (!_sbReady) {
+    var c = DATA.configuracoes&&tenantId ? DATA.configuracoes[tenantId]||{} : {};
+    return {disponivel:true, vagas_max:c.vagas_simultaneas||1, ocupados:0, disponiveis:1};
   }
-  return data;
+  var r = await _sb.rpc('verificar_vagas', {
+    p_tenant_id:tenantId, p_inicio:inicio, p_fim:fim, p_excluir_id:excluirId||null
+  });
+  if (r.error) {
+    console.warn('[GBR SB] verificar_vagas:', r.error.message);
+    var c2 = DATA.configuracoes&&tenantId ? DATA.configuracoes[tenantId]||{} : {};
+    return {disponivel:true, vagas_max:c2.vagas_simultaneas||1};
+  }
+  return r.data;
 }
-
-// Registrar log de auditoria
-async function _sbLogAuditoria(acao, modulo, detalhes) {
-  if (!_sbClient || !_sbTenantId) return;
-  await _sbClient.from('audit_logs').insert({
-    tenant_id:  _sbTenantId,
-    user_id:    _sbUserId || null,
-    user_email: (currentUser && currentUser.email) || null,
-    acao:       acao,
-    modulo:     modulo || null,
-    detalhes:   detalhes || null
+async function _sbLog(acao, modulo, detalhes) {
+  if (!_sbReady||!_sbTenantId) return;
+  await _sb.from('audit_logs').insert({
+    tenant_id:_sbTenantId, user_id:_sbUserId||null,
+    user_email:_sbUserEmail||(currentUser&&currentUser.email)||null,
+    acao:acao, modulo:modulo||null, detalhes:detalhes||null
   });
 }
 
-// Desconectar tudo ao fazer logout
-function _sbDesconectar() {
-  _sbChannels.forEach(function(ch) { try { _sbClient && _sbClient.removeChannel(ch); } catch(e) {} });
-  _sbChannels = [];
-  _sbSyncOk   = false;
-  _sbTenantId = null;
-  _sbUserId   = null;
-  if (_sbClient) { try { _sbClient.auth.signOut(); } catch(e) {} }
-  _gbrAtualizarIndicadorSync('off', 'Offline');
-}
-
-// Inicializar na carga da página
-_sbInit();
-
-// ════════════════════════════════════════════════════════
-//  GBR LICENSE BRIDGE — Integração Firebase ↔ Console
-// ════════════════════════════════════════════════════════
-var _gbrFbDb = null, _gbrFbAuth = null, _gbrLicMonitor = null;
-(function _gbrFirebaseInit(){
+async function fazerLogin() {
+  var email = document.getElementById('loginEmail').value.trim().toLowerCase();
+  var senha  = document.getElementById('loginSenha').value.trim();
+  if (!email||!senha) { showLoginMsg('Preencha email e senha','erro'); return; }
+  if (!_sbReady) { showLoginMsg('Sistema nao conectado. Recarregue a pagina.','erro'); return; }
+  var btn = document.getElementById('btnLogin');
+  if (btn) { btn.disabled=true; btn.textContent='Acessando...'; }
   try {
-    var GBR_FB = {
-      apiKey:        "AIzaSyAg-UvkLSkZdnYZz1a_JySU_tbHrHkLeVI",
-      authDomain:    "gbr-sistemas-admin-964c5.firebaseapp.com",
-      databaseURL:   "https://gbr-sistemas-admin-964c5-default-rtdb.firebaseio.com",
-      projectId:     "gbr-sistemas-admin-964c5",
-      storageBucket: "gbr-sistemas-admin-964c5.firebasestorage.app",
-      appId:         "1:713445653786:web:89104a17c993b3a40f40a3"
-    };
-    var app = firebase.apps.find(a=>a.name==='gbr-lic') || firebase.initializeApp(GBR_FB,'gbr-lic');
-    _gbrFbDb   = firebase.database(app);
-    _gbrFbAuth = firebase.auth(app);
-    console.log('[GBR] Firebase de licenciamento conectado.');
-  } catch(e) {
-    console.warn('[GBR] Firebase de licenciamento indisponível:', e.message);
-  }
-})();
+    var authRes = await _sb.auth.signInWithPassword({email:email, password:senha});
+    if (authRes.error) {
+      var msgs = {
+        'Invalid login credentials': 'Email ou senha incorretos.',
+        'Email not confirmed': 'Confirme seu email antes de acessar.',
+        'Too many requests': 'Muitas tentativas. Aguarde.'
+      };
+      showLoginMsg(msgs[authRes.error.message]||authRes.error.message, 'erro'); return;
+    }
+    _sbUserId    = authRes.data.user.id;
+    _sbUserEmail = authRes.data.user.email;
 
-/* ── Carrega personalizações CMS do Firebase para este tenant ── */
+    var utRes = await _sb.from('user_tenants')
+      .select('tenant_id, role').eq('user_id', _sbUserId).eq('ativo', true).single();
+    if (utRes.error || !utRes.data) {
+      showLoginMsg('Usuario sem estetica vinculada. Contate o suporte.','erro'); return;
+    }
+    _sbTenantId = utRes.data.tenant_id;
+    var tenantObj = await _sbCarregarTudo(_sbTenantId);
+    if (!tenantObj) return;
+
+    var roleNorm = ({woner:'woner',owner:'woner',admin:'admin',operador:'operador'})[utRes.data.role] || utRes.data.role;
+    var fbTenant = {
+      id: _sbTenantId, nome: tenantObj.nome||_sbTenantId,
+      slug: (tenantObj.nome||_sbTenantId).toLowerCase().replace(/[^a-z0-9]/g,'-'),
+      data_expiracao: tenantObj.expiracao||null,
+      ativo: tenantObj.status_licenca !== 'inativo',
+      plano_nome: tenantObj.nome_exibicao_plano||tenantObj.plano||'basico', _sbData: tenantObj
+    };
+    var fbUser = {
+      id: _sbTenantId+'__'+_sbUserId, email: email,
+      nome: tenantObj.responsavel||tenantObj.nome||email.split('@')[0],
+      role: roleNorm, tenant_id: _sbTenantId,
+      password: '__supabase__', must_change_password: false, ativo: true, _sbFromSB: true
+    };
+    var tIdx = DATA.tenants.findIndex(function(t){return t.id===_sbTenantId;});
+    if (tIdx>=0) DATA.tenants[tIdx]=fbTenant; else DATA.tenants.push(fbTenant);
+    var uIdx = DATA.users.findIndex(function(u){return u.id===fbUser.id;});
+    if (uIdx>=0) DATA.users[uIdx]=fbUser; else DATA.users.push(fbUser);
+
+    loginSucesso(fbUser);
+    _sbAtivarRealtime(_sbTenantId);
+    if (tenantObj.aparencia) _gbrCarregarPersonalizacoes(_sbTenantId, {style:tenantObj.aparencia});
+
+  } catch(e) {
+    console.error('[GBR SB] fazerLogin:', e);
+    showLoginMsg('Erro inesperado: '+e.message,'erro');
+  } finally {
+    if (btn) { btn.disabled=false; btn.textContent='Acessar'; }
+  }
+}
+
+function fazerLogout() {
+  _sbChannels.forEach(function(ch){try{_sb&&_sb.removeChannel(ch);}catch(e){}});
+  _sbChannels=[]; _sbTenantId=null; _sbUserId=null;
+  if (_sb) _sb.auth.signOut();
+  localStorage.removeItem('gbr_sessao');
+  currentUser=null; currentTenant=null; currentCaixa=null;
+  document.getElementById('appShell').style.display='none';
+  document.getElementById('trocaSenhaPage').style.display='none';
+  document.getElementById('loginPage').style.display='flex';
+  _gbrAtualizarIndicadorSync('off','Offline');
+}
+
 function _gbrCarregarPersonalizacoes(tenantId, tenantData) {
   if (!tenantData) return;
-  var r = document.documentElement;
-
-  // Estilo / White-label
   var stl = tenantData.style || {};
-  if (stl.ac)  r.style.setProperty('--accent',  stl.ac);
-  if (stl.ac2) r.style.setProperty('--accent2', stl.ac2);
-  if (stl.bg)  r.style.setProperty('--bg',      stl.bg);
-  if (stl.text) r.style.setProperty('--text',   stl.text);
-  if (stl.name) {
-    var lb = document.querySelector('.logo-name');
-    if (lb) lb.textContent = stl.name;
-    document.title = stl.name;
-  }
+  var r = document.documentElement;
+  if (stl.ac)   r.style.setProperty('--accent', stl.ac);
+  if (stl.ac2)  r.style.setProperty('--accent2', stl.ac2);
+  if (stl.bg)   r.style.setProperty('--bg', stl.bg);
+  if (stl.name) { var lb=document.querySelector('.logo-name'); if(lb) lb.textContent=stl.name; document.title=stl.name; }
   if (stl.logo) {
-    var logoBox = document.querySelector('.logo-box');
-    if (logoBox) { logoBox.style.background='transparent'; logoBox.innerHTML='<img src="'+stl.logo+'" style="width:100%;height:100%;object-fit:contain;border-radius:8px">'; }
-  }
-
-  // CSS customizado
-  if (tenantData.cms_css) {
-    var el = document.getElementById('gbr-cms-css') || document.createElement('style');
-    el.id = 'gbr-cms-css'; el.textContent = tenantData.cms_css;
-    if (!el.parentNode) document.head.appendChild(el);
-  }
-
-  // JS customizado (executado com segurança)
-  if (tenantData.cms_js) {
-    try { (new Function(tenantData.cms_js))(); }
-    catch(e) { console.warn('[GBR CMS JS]', e); }
-  }
-
-  // Notificação do admin pendente
-  if (tenantData.cms_notif && !tenantData.cms_notif.lido) {
-    var n = tenantData.cms_notif;
-    setTimeout(function(){ toast(n.msg, n.tipo || 'info'); }, 2500);
-    try { _gbrFbDb.ref('tenants/'+tenantId+'/cms_notif/lido').set(true); } catch(e){}
-  }
-
-  // Injeções HTML/JS
-  if (tenantData.cms_injecoes) {
-    Object.entries(tenantData.cms_injecoes).forEach(function(kv){
-      if (!kv[1] || kv[1].ativo === false) return;
-      _gbrAplicarInjecao(kv[0], kv[1]);
-    });
+    var lb2=document.querySelector('.logo-box');
+    if(lb2){lb2.style.background='transparent';lb2.innerHTML='<img src="'+stl.logo+'" style="width:100%;height:100%;object-fit:contain;border-radius:8px">';}
   }
 }
 
-/* ── Injeta um bloco HTML/JS na posição correta ── */
-function _gbrAplicarInjecao(id, inj) {
-  var old = document.getElementById('gbr-inj-'+id);
-  if (old) old.remove();
-  var wrap = document.createElement('div');
-  wrap.id = 'gbr-inj-'+id;
-  wrap.innerHTML = inj.code || '';
-  var pos = inj.pos || 'bottom';
-  if (pos === 'top') {
-    var app = document.getElementById('appShell') || document.body.firstElementChild;
-    document.body.insertBefore(wrap, app);
-  } else if (pos === 'sidebar') {
-    var nav = document.querySelector('.sidebar');
-    if (nav) nav.appendChild(wrap); else document.body.appendChild(wrap);
-  } else if (pos === 'global') {
-    document.head.appendChild(wrap);
-  } else {
-    document.body.appendChild(wrap);
-  }
-  wrap.querySelectorAll('script').forEach(function(s){
-    try { (new Function(s.textContent))(); } catch(e){ console.warn('[GBR Inject]',e); }
+function salvarDados() {
+  var allKeys=[].concat(Object.keys(DATA),['movimentacoes_fin','tickets','auditoria','configuracoes','permissoes']);
+  allKeys.forEach(function(k) {
+    if(DATA[k]===undefined) return;
+    try { localStorage.setItem('gbr_'+k, JSON.stringify(DATA[k])); } catch(e) {}
   });
 }
 
-/* ── Monitor em tempo real: kill switch + expiração de licença ── */
-function _gbrMonitorarLicenca(tenantId) {
-  if (!_gbrFbDb || !tenantId) return;
-  if (_gbrLicMonitor) { try { _gbrLicMonitor(); } catch(e){} }
-  var ref = _gbrFbDb.ref('tenants/'+tenantId+'/licenca');
-  ref.on('value', function(snap){
-    var lic = snap.val();
-    if (!lic) return;
-
-    var killAtivo   = lic.killSwitch === true;
-    var inativo     = lic.status === 'inativo' || lic.ativo === false;
-    var expirado    = lic.expiracao && new Date(lic.expiracao) < new Date();
-
-    if ((killAtivo || inativo || expirado) && currentUser && currentUser._gbrFromFB) {
-      var motivo = killAtivo
-        ? '🔒 Licença Suspensa/Bloqueada pelo administrador.'
-        : expirado
-          ? '⏰ Sua licença expirou. Contate o suporte para renovar.'
-          : '⛔ Conta inativa. Entre em contato com o suporte.';
-
-      // Bloquear UI imediatamente com overlay
-      var overlay = document.createElement('div');
-      overlay.id = 'gbr-kill-overlay';
-      overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px';
-      overlay.innerHTML = '<div style="font-size:48px">🔒</div>'
-        + '<div style="font-family:\'DM Sans\',sans-serif;font-size:18px;font-weight:700;color:#fff;text-align:center;max-width:420px;line-height:1.5">' + motivo + '</div>'
-        + '<div style="font-size:13px;color:#aaa;text-align:center">Você será desconectado em instantes...</div>';
-      if (!document.getElementById('gbr-kill-overlay')) document.body.appendChild(overlay);
-
-      setTimeout(function(){
-        fazerLogout();
-        var ol = document.getElementById('gbr-kill-overlay');
-        if (ol) ol.remove();
-      }, 3500);
-    }
-
-    // Atualizar modulos_liberados e limites em tempo real sem desconectar
-    if (lic.modulos_liberados && Array.isArray(lic.modulos_liberados)) {
-      window._gbrModulosLiberados = lic.modulos_liberados;
-      window._gbrMaxColaboradores = lic.max_colaboradores || 2;
-      window._gbrMaxVagas = lic.max_vagas || 20;
-      _gbrAplicarPaywall();
-      // Atualiza o input de vagas se o admin estiver com a aba aberta
-      var vagasEl = document.getElementById('adm_vagas');
-      if (vagasEl) {
-        vagasEl.max = window._gbrMaxVagas;
-        var titEl = vagasEl.closest('.form-group');
-        if (titEl) {
-          var hint = titEl.querySelector('.vagas-hint');
-          if (!hint) { hint = document.createElement('div'); hint.className='vagas-hint'; hint.style.cssText='font-size:10px;color:var(--text3);margin-top:3px'; titEl.appendChild(hint); }
-          hint.textContent = 'Máximo permitido no plano ' + (window._gbrNomePlano||'atual') + ': ' + window._gbrMaxVagas + ' vaga(s)';
-        }
-      }
-    }
+function carregarDados() {
+  var allKeys=[].concat(Object.keys(DATA),['movimentacoes_fin','tickets','auditoria','configuracoes','permissoes']);
+  allKeys.forEach(function(k) {
+    try { var d=localStorage.getItem('gbr_'+k); if(d) DATA[k]=JSON.parse(d); } catch(e) {}
   });
-  _gbrLicMonitor = function(){ ref.off(); };
+  var lp = document.getElementById('loginPage');
+  if (lp) lp.style.display = 'flex';
 }
 
-/* ── Login via Firebase Auth + validação de licença em tempo real ── */
-async function _gbrLoginFirebase(email, senha) {
-  if (!_gbrFbAuth || !_gbrFbDb) return false;
-  try {
-    await _gbrFbAuth.signInWithEmailAndPassword(email, senha);
-  } catch(e) {
-    // Erros esperados: credencial inválida → fallback para auth local
-    if (['auth/wrong-password','auth/user-not-found','auth/invalid-credential',
-         'auth/invalid-email','auth/too-many-requests'].includes(e.code)) {
-      return false; // deixa o login local tentar
-    }
-    // Erros de rede / configuração → logar mas não bloquear o local
-    console.warn('[GBR Firebase Auth]', e.code, e.message);
-    return false;
-  }
-
-  // Buscar mapeamento tenant
-  var emailKey = email.toLowerCase().replace(/\./g,'_').replace(/@/g,'__');
-  var userTenantSnap = await _gbrFbDb.ref('userTenants/'+emailKey).once('value');
-  var userTenant = userTenantSnap.val();
-  if (!userTenant) return false; // usuário Firebase sem tenant → fallback local
-
-  var tenantId = userTenant.tenantId;
-  var tenantSnap = await _gbrFbDb.ref('tenants/'+tenantId).once('value');
-  var tenantData = tenantSnap.val();
-  if (!tenantData) { showLoginMsg('Estética não encontrada. Contate o suporte.','erro'); return true; }
-
-  var lic  = tenantData.licenca || {};
-  var info = tenantData.info    || {};
-
-  // Validações de licença
-  if (lic.killSwitch === true) {
-    showLoginMsg('⛔ Acesso bloqueado pelo administrador. Contate o suporte.','erro'); return true;
-  }
-  if (lic.status === 'inativo') {
-    showLoginMsg('Conta inativa. Contate o suporte.','erro'); return true;
-  }
-  if (lic.expiracao && new Date(lic.expiracao) < new Date()) {
-    var expFmt = new Date(lic.expiracao).toLocaleDateString('pt-BR');
-    showLoginMsg('Licença expirada em '+expFmt+'. Contate o suporte.','erro'); return true;
-  }
-  if (userTenant.authStatus && userTenant.authStatus !== 'ativo') {
-    showLoginMsg('Usuário inativo. Contate o suporte.','erro'); return true;
-  }
-
-  // Montar objetos compatíveis com o sistema
-  var fbTenant = {
-    id: tenantId,
-    nome: info.nome || tenantId,
-    slug: (info.nome||tenantId).toLowerCase().replace(/[^a-z0-9]/g,'-'),
-    data_expiracao: lic.expiracao || null,
-    ativo: lic.status !== 'inativo',
-    plano_nome: lic.nome_exibicao || lic.plano || 'basico',
-    plano_valor: 0,
-    created_at: info.criadoEm || new Date().toISOString(),
-    aparencia: tenantData.style ? {
-      accent: tenantData.style.ac,
-      bg:     tenantData.style.bg,
-      sys_nome: tenantData.style.name
-    } : null,
-    _gbrFbData: tenantData
-  };
-
-  // ── Carregar módulos liberados dinamicamente do Firebase ──
-  // Prioridade: licença do tenant (override) → plano base → sem restrição
-  var modLibsPromise;
-  if (lic.modulos_liberados && Array.isArray(lic.modulos_liberados) && lic.modulos_liberados.length > 0) {
-    // Tenant tem override direto na licença
-    modLibsPromise = Promise.resolve(lic.modulos_liberados);
-    window._gbrMaxColaboradores = lic.max_colaboradores || 2;
-    window._gbrMaxVagas = lic.max_vagas || 20;
-  } else {
-    // Busca do plano base no Firebase
-    modLibsPromise = _gbrFbDb.ref('planos/' + (lic.plano || 'basico')).once('value').then(function(pSnap){
-      var p = pSnap.val() || {};
-      window._gbrMaxColaboradores = p.max_colaboradores || p.colaboradores_max || 2;
-      window._gbrMaxVagas = p.max_vagas || 20;
-      if (p.modulos_liberados && Array.isArray(p.modulos_liberados)) return p.modulos_liberados;
-      // Fallback: converter objeto bool→array
-      return Object.entries(p.modulos||{}).filter(function(kv){return kv[1];}).map(function(kv){return kv[0];});
-    }).catch(function(){ return []; });
-  }
-
-  modLibsPromise.then(function(modLibs) {
-    window._gbrModulosLiberados = modLibs;
-    window._gbrNomePlano = lic.nome_exibicao || lic.plano || 'basico';
-    // Aplica cadeados após login
-    setTimeout(_gbrAplicarPaywall, 400);
-  });
-
-  // Normalizar role para padrão woner > admin > operador
-  var rawRole = userTenant.role || 'operador';
-  var normalizedRole = rawRole;
-  if (rawRole === 'dono' || rawRole === 'owner' || rawRole === 'superadmin') normalizedRole = 'woner';
-  if (rawRole === 'gerente') normalizedRole = 'admin';
-
-  var fbUser = {
-    id: tenantId + '__' + emailKey,
-    email: email.toLowerCase(),
-    nome: userTenant.nome || info.responsavel || email.split('@')[0],
-    role: normalizedRole,
-    tenant_id: tenantId,
-    password: '__firebase__',
-    must_change_password: false,
-    ativo: true,
-    created_at: userTenant.criadoEm || new Date().toISOString(),
-    _gbrFromFB: true
-  };
-
-  // Sincronizar com DATA (sem duplicar)
-  var tIdx = DATA.tenants.findIndex(function(t){ return t.id === tenantId; });
-  if (tIdx >= 0) DATA.tenants[tIdx] = fbTenant; else DATA.tenants.push(fbTenant);
-  var uIdx = DATA.users.findIndex(function(u){ return u.id === fbUser.id; });
-  if (uIdx >= 0) DATA.users[uIdx] = fbUser; else DATA.users.push(fbUser);
-
-  // Login
-  loginSucesso(fbUser);
-
-  // Registrar último acesso no Firebase para o console
-  try { _gbrFbDb.ref('tenants/'+tenantId+'/ultimoAcesso').set(new Date().toISOString()); } catch(e) {}
-
-  // Personalizações CMS (estilo, CSS, JS, notificações, injeções)
-  _gbrCarregarPersonalizacoes(tenantId, tenantData);
-
-  // Monitoramento em tempo real de licença
-  _gbrMonitorarLicenca(tenantId);
-
-  // ── SUPABASE: Login + carga de dados + realtime ────────────
-  _sbTenantId = tenantId;
-  (async function() {
-    try {
-      // Tentar login Supabase com as mesmas credenciais
-      var sbData = await _sbLogin(email, senha);
-      if (sbData) {
-        _sbUserId = sbData.user.id;
-      }
-      // Carregar dados do tenant do Supabase (substitui localStorage)
-      var ok = await _sbCarregarDados(tenantId);
-      if (ok) {
-        // Ativar realtime subscriptions
-        _sbAtivarRealtime(tenantId);
-        // Re-render após carga (dados podem ter mudado vs cache local)
-        setTimeout(_gbrReRenderPaginaAtiva, 300);
-      } else {
-        // Fallback: usar dados do localStorage já carregados
-        console.warn('[GBR SB] Usando dados do localStorage como fallback.');
-        _gbrAtivarSync(tenantId); // Firebase sync como fallback secundário
-      }
-    } catch(e) {
-      console.warn('[GBR SB] Erro na inicialização do sync:', e.message);
-      _gbrAtivarSync(tenantId);
-    }
-  })();
-
-  // Monitorar notificações enviadas pelo console
-  if(_gbrFbDb&&tenantId){
-    try{
-      _gbrFbDb.ref('notifications/'+tenantId).orderByChild('ts').limitToLast(10).on('child_added',function(snap){
-        var n=snap.val();if(!n||n.lida)return;
-        setTimeout(function(){toast('🔔 '+n.titulo+': '+n.mensagem,'success');},1000);
-        // Adicionar ao cache e atualizar badge sem marcar como lida automaticamente
-        _notifCache.unshift({id:snap.key,...n});
-        atualizarBadgeNotif();
-        _gbrFbDb.ref('notifications/'+tenantId+'/'+snap.key+'/lida').set(true);
-      });
-    }catch(e){console.warn('[GBR] notif monitor:',e);}
-  }
-
-  return true; // login tratado pelo Firebase
-}
-
-/* ── Listener postMessage: recebe comandos CMS do Console ── */
-window.addEventListener('message', function(evt) {
-  var d = evt.data;
-  if (!d || d.gbr) return; // mensagens GBR_API já tratadas em outro listener
-  switch(d.type) {
-    case 'cms_style_preview': {
-      var r = document.documentElement;
-      if (d.ac)   r.style.setProperty('--accent',  d.ac);
-      if (d.ac2)  r.style.setProperty('--accent2', d.ac2);
-      if (d.bg)   r.style.setProperty('--bg',      d.bg);
-      if (d.text) r.style.setProperty('--text',    d.text);
-      if (d.name) { var lb=document.querySelector('.logo-name'); if(lb) lb.textContent=d.name; document.title=d.name; }
-      if (d.logo) {
-        var logoImgs=document.querySelectorAll('.logo-box-img,.sidebar-logo-img');
-        logoImgs.forEach(function(img){img.src=d.logo;img.style.display='block';});
-        var logoBox=document.querySelector('.logo-box');
-        if(logoBox){logoBox.style.background='transparent';logoBox.innerHTML='<img src="'+d.logo+'" style="width:100%;height:100%;object-fit:contain;border-radius:8px">';}
-      }
-      break;
-    }
-    case 'cms_css_preview': {
-      var el = document.getElementById('gbr-cms-css-preview') || document.createElement('style');
-      el.id = 'gbr-cms-css-preview'; el.textContent = d.css || '';
-      if (!el.parentNode) document.head.appendChild(el);
-      break;
-    }
-    case 'cms_js_exec':
-      try { (new Function(d.js))(); } catch(e){ console.warn('[GBR CMS JS Preview]',e); }
-      break;
-    case 'cms_inject_preview':
-      if (d.code) _gbrAplicarInjecao('preview-tmp', {pos: d.pos||'bottom', code: d.code, ativo: true});
-      break;
-    case 'cms_auto_login':
-      // Login automático via console sem precisar de senha
-      if (d.tenantId && d.tenantData) {
-        var td = d.tenantData;
-        var emailKey = (d.email||'preview').replace(/\./g,'_').replace(/@/g,'__');
-        var fbUser = {
-          id: d.tenantId+'__preview',
-          email: d.email || 'preview@gbr.admin',
-          nome: td.info?.responsavel || td.info?.nome || 'Preview Admin',
-          role: 'owner',
-          tenant_id: d.tenantId,
-          password: '__preview__',
-          must_change_password: false,
-          ativo: true,
-          _gbrFromFB: true,
-          _isPreview: true
-        };
-        var fbTenant = {
-          id: d.tenantId, nome: td.info?.nome||d.tenantId,
-          slug: d.tenantId, ativo: true,
-          data_expiracao: td.licenca?.expiracao || new Date(Date.now()+86400000).toISOString(),
-          config_empresa: td.info || {}
-        };
-        var tIdx = DATA.tenants.findIndex(function(t){ return t.id===d.tenantId; });
+// Restaurar sessao Supabase ao recarregar pagina
+(function() {
+  if (!_sbReady) return;
+  _sb.auth.onAuthStateChange(async function(event, session) {
+    if (event === 'SIGNED_IN' && session && !_sbTenantId) {
+      _sbUserId    = session.user.id;
+      _sbUserEmail = session.user.email;
+      try {
+        var utRes = await _sb.from('user_tenants')
+          .select('tenant_id,role').eq('user_id',_sbUserId).eq('ativo',true).single();
+        if (!utRes.data) return;
+        _sbTenantId = utRes.data.tenant_id;
+        var tenantObj = await _sbCarregarTudo(_sbTenantId);
+        if (!tenantObj) return;
+        var roleNorm = ({woner:'woner',owner:'woner',admin:'admin',operador:'operador'})[utRes.data.role]||utRes.data.role;
+        var fbTenant = {id:_sbTenantId, nome:tenantObj.nome||_sbTenantId,
+          slug:(tenantObj.nome||_sbTenantId).toLowerCase().replace(/[^a-z0-9]/g,'-'),
+          data_expiracao:tenantObj.expiracao||null, ativo:tenantObj.status_licenca!=='inativo',
+          plano_nome:tenantObj.nome_exibicao_plano||tenantObj.plano||'basico', _sbData:tenantObj};
+        var fbUser = {id:_sbTenantId+'__'+_sbUserId, email:_sbUserEmail,
+          nome:tenantObj.responsavel||tenantObj.nome||_sbUserEmail.split('@')[0],
+          role:roleNorm, tenant_id:_sbTenantId, password:'__supabase__',
+          must_change_password:false, ativo:true, _sbFromSB:true};
+        var tIdx=DATA.tenants.findIndex(function(t){return t.id===_sbTenantId;});
         if(tIdx>=0) DATA.tenants[tIdx]=fbTenant; else DATA.tenants.push(fbTenant);
-        var uIdx = DATA.users.findIndex(function(u){ return u.id===fbUser.id; });
+        var uIdx=DATA.users.findIndex(function(u){return u.id===fbUser.id;});
         if(uIdx>=0) DATA.users[uIdx]=fbUser; else DATA.users.push(fbUser);
         loginSucesso(fbUser);
-        if(td.style) _gbrCarregarPersonalizacoes(d.tenantId, td);
-      }
-      break;
-  }
-});
+        _sbAtivarRealtime(_sbTenantId);
+        if (tenantObj.aparencia) _gbrCarregarPersonalizacoes(_sbTenantId, {style:tenantObj.aparencia});
+      } catch(e) { console.warn('[GBR SB] restore session:', e.message); }
+    }
+  });
+})();
+
+// ════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════
 let diaAgenda=new Date();
 let semanaAgenda=new Date();
