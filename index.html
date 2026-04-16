@@ -328,6 +328,35 @@ td{padding:11px 14px;vertical-align:middle}
 .admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:699px){.admin-grid{grid-template-columns:1fr}}
 
+/* ═══ SYNC INDICATOR ═══ */
+#gbrSyncIndicator{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 9px;border-radius:12px;font-size:10px;font-weight:600;
+  letter-spacing:.3px;transition:all .3s;cursor:default;flex-shrink:0
+}
+#gbrSyncIndicator.sync-ok{
+  background:rgba(16,185,129,.1);color:var(--green);
+  border:1px solid rgba(16,185,129,.2)
+}
+#gbrSyncIndicator.sync-off{
+  background:rgba(255,255,255,.06);color:var(--text3);
+  border:1px solid var(--border)
+}
+#gbrSyncIndicator.sync-saving{
+  background:rgba(59,130,246,.1);color:var(--blue);
+  border:1px solid rgba(59,130,246,.2)
+}
+#gbrSyncIndicator .sync-dot{
+  width:6px;height:6px;border-radius:50%;background:currentColor
+}
+#gbrSyncIndicator.sync-ok .sync-dot{
+  animation:syncPulse 2s ease-in-out infinite
+}
+@keyframes syncPulse{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.4;transform:scale(.8)}
+}
+
 /* ═══ AGENDA MULTI-VAGA ═══ */
 .slot-multi{
   flex-wrap:wrap;
@@ -709,6 +738,9 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
       <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
       <span class="topbar-title" id="topbarTitle">Dashboard</span>
       <div class="topbar-right">
+        <span id="gbrSyncIndicator" class="sync-off" title="Status de sincronização multi-device">
+          <span class="sync-dot"></span><span id="gbrSyncTxt">Offline</span>
+        </span>
         <div class="caixa-pill fechado" id="caixaPill" onclick="showPage('caixa')">● <span id="caixaPillTxt">Caixa Fechado</span></div>
         <span class="topbar-date" id="topbarDate"></span>
         <!-- Sino de notificações -->
@@ -1273,6 +1305,16 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
 
       <!-- ABA SEGURANÇA -->
       <div class="admin-panel" id="adminp-seguranca">
+        <!-- Card de sincronização Firebase -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header">
+            <div class="card-title">🔄 Sincronização Multi-Device</div>
+            <div class="card-sub">Garante que dados criados no mobile apareçam no desktop e vice-versa</div>
+          </div>
+          <div id="syncStatusCard" style="padding:4px 0">
+            <div style="color:var(--text2);font-size:12px">Carregando status...</div>
+          </div>
+        </div>
         <div class="card">
           <div class="card-title" style="margin-bottom:16px">🗑️ Reset Seletivo por Categoria</div>
           <div class="info-box danger" style="margin-bottom:14px">⚠ <strong>Ação irreversível.</strong> Faça um backup antes de continuar (Botão "Exportar Backup" nas Configurações).</div>
@@ -1882,6 +1924,207 @@ function _gbrModalUpgrade(pageId) {
   modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
 }
 
+
+// ════════════════════════════════════════════════════════════════
+//  GBR FIREBASE SYNC ENGINE
+//  Resolve: dados criados no mobile não aparecem no desktop
+//
+//  Causa raiz: o sistema usava APENAS localStorage, que é
+//  isolado por dispositivo/browser. Dados de um usuário não
+//  chegavam ao outro mesmo sendo da mesma estética.
+//
+//  Solução: Firebase Realtime Database como fonte única de
+//  verdade para todos os dados operacionais do tenant.
+// ════════════════════════════════════════════════════════════════
+
+var _gbrSyncAtivo = false;
+var _gbrSyncListeners = {};
+// Chaves operacionais que devem ser sincronizadas via Firebase
+var _GBR_SYNC_KEYS = [
+  'clientes','agendamentos','servicos','produtos',
+  'fichas','checklists','caixas','movimentacoes',
+  'regras_fidelidade','resgates_fidelidade',
+  'nps_avaliacoes','wa_templates','wa_historico',
+  'movimentacoes_fin','auditoria','configuracoes','permissoes'
+];
+
+// ── Atualiza indicador visual de sync na topbar ─────────────────
+function _gbrAtualizarIndicadorSync(estado, txt) {
+  var el = document.getElementById('gbrSyncIndicator');
+  var txEl = document.getElementById('gbrSyncTxt');
+  if (!el) return;
+  el.className = 'sync-' + estado;
+  if (txEl) txEl.textContent = txt || estado;
+}
+
+// ── Converte objeto Firebase de volta para array se necessário ──
+function _gbrFbParaArray(val) {
+  if (val === null || val === undefined) return val;
+  if (Array.isArray(val)) return val;
+  if (typeof val !== 'object') return val;
+  var keys = Object.keys(val);
+  if (keys.length === 0) return [];
+  // Array-like: todas as chaves são números sequenciais
+  var todosNumericos = keys.every(function(k) { return !isNaN(parseInt(k)); });
+  if (todosNumericos) return Object.values(val);
+  return val; // objeto real (ex: configuracoes)
+}
+
+// ── Ativa o sync Firebase para o tenant logado ──────────────────
+function _gbrAtivarSync(tenantId) {
+  if (!_gbrFbDb || !tenantId || _gbrSyncAtivo) return;
+  _gbrSyncAtivo = true;
+  _gbrAtualizarIndicadorSync('saving', 'Sincronizando...');
+  console.log('[GBR Sync] Firebase sync ativado para tenant:', tenantId);
+
+  var ref = _gbrFbDb.ref('dados_operacionais/' + tenantId);
+
+  if (_gbrSyncListeners._main) {
+    try { _gbrSyncListeners._main.off(); } catch(e) {}
+  }
+
+  _gbrSyncListeners._main = ref;
+  var _primeiraLeitura = true;
+
+  ref.on('value', function(snap) {
+    var dadosFirebase = snap.val();
+
+    if (!dadosFirebase) {
+      // Primeira vez no Firebase — migrar dados locais
+      _gbrEnviarLocalStorageParaFirebase(tenantId);
+      _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
+      _primeiraLeitura = false;
+      return;
+    }
+
+    var houveMudanca = false;
+    _GBR_SYNC_KEYS.forEach(function(chave) {
+      if (dadosFirebase[chave] !== undefined) {
+        var dadoFb = _gbrFbParaArray(dadosFirebase[chave]);
+        // Comparação profunda para detectar mudanças reais
+        if (JSON.stringify(DATA[chave]) !== JSON.stringify(dadoFb)) {
+          DATA[chave] = dadoFb;
+          houveMudanca = true;
+        }
+      }
+    });
+
+    if (houveMudanca || _primeiraLeitura) {
+      // Cache local
+      _GBR_SYNC_KEYS.forEach(function(k) {
+        try { localStorage.setItem('gbr_' + k, JSON.stringify(DATA[k])); } catch(e) {}
+      });
+      if (!_primeiraLeitura) {
+        // Mudança externa detectada — re-renderiza sem piscar
+        _gbrAtualizarIndicadorSync('saving', 'Atualizando...');
+        setTimeout(function() {
+          _gbrReRenderPaginaAtiva();
+          _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
+        }, 200);
+      } else {
+        _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
+      }
+    } else {
+      _gbrAtualizarIndicadorSync('ok', 'Sincronizado');
+    }
+    _primeiraLeitura = false;
+
+  }, function(err) {
+    console.warn('[GBR Sync] Erro no listener:', err.message);
+    _gbrSyncAtivo = false;
+    if (err.code === 'PERMISSION_DENIED') {
+      // Regras do Firebase não incluem dados_operacionais ainda
+      // Mostrar aviso admin com instrução para atualizar as regras
+      _gbrAtualizarIndicadorSync('off', 'Sem permissão');
+      console.warn('[GBR Sync] ATENÇÃO: Adicione o nó "dados_operacionais" nas Regras do Firebase (Console > Firebase API > Regras). Use o template "GBR Padrão".');
+      // Toast apenas para owner/admin
+      if (currentUser && ['woner','owner','admin','superadmin'].includes(currentUser.role)) {
+        setTimeout(function() {
+          toast('⚠ Sync desativado: atualize as Regras do Firebase no Console (Template GBR Padrão).', 'warn');
+        }, 2000);
+      }
+    } else {
+      _gbrAtualizarIndicadorSync('off', 'Offline');
+    }
+  });
+}
+
+// ── Envia dados do localStorage para o Firebase (migração inicial) ──
+function _gbrEnviarLocalStorageParaFirebase(tenantId) {
+  if (!_gbrFbDb || !tenantId) return;
+  var updates = {};
+  var temDados = false;
+
+  _GBR_SYNC_KEYS.forEach(function(chave) {
+    var val = DATA[chave];
+    if (val !== undefined && val !== null) {
+      // Arrays vazios não precisam subir
+      if (Array.isArray(val) && val.length === 0) return;
+      if (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0) return;
+      updates[chave] = val;
+      temDados = true;
+    }
+  });
+
+  if (temDados) {
+    _gbrFbDb.ref('dados_operacionais/' + tenantId).update(updates)
+      .then(function() {
+        console.log('[GBR Sync] Dados locais enviados ao Firebase.');
+      })
+      .catch(function(e) {
+        console.warn('[GBR Sync] Erro ao enviar dados iniciais:', e.message);
+      });
+  }
+}
+
+// ── Salva UMA chave específica no Firebase ──────────────────────
+function _gbrSyncSalvar(chave, valor, tenantId) {
+  tenantId = tenantId || (currentTenant && currentTenant.id);
+  if (!_gbrFbDb || !tenantId || !_gbrSyncAtivo) return;
+  _gbrFbDb.ref('dados_operacionais/' + tenantId + '/' + chave)
+    .set(valor)
+    .catch(function(e) {
+      console.warn('[GBR Sync] Erro ao salvar ' + chave + ':', e.message);
+    });
+}
+
+// ── Re-renderiza a página ativa sem perder o estado ─────────────
+function _gbrReRenderPaginaAtiva() {
+  try {
+    var pgAtiva = document.querySelector('.page.active');
+    if (!pgAtiva) return;
+    var pgId = pgAtiva.id; // ex: 'pg-clientes'
+    var nome = pgId.replace('pg-', ''); // ex: 'clientes'
+    var renders = {
+      clientes:      typeof renderClientes      === 'function' ? renderClientes      : null,
+      agendamentos:  typeof renderAgendamentos  === 'function' ? renderAgendamentos  : null,
+      agenda:        typeof renderAgenda        === 'function' ? renderAgenda        : null,
+      servicos:      typeof renderServicos      === 'function' ? renderServicos      : null,
+      estoque:       typeof renderEstoque       === 'function' ? renderEstoque       : null,
+      caixa:         typeof renderCaixa         === 'function' ? renderCaixa         : null,
+      fidelidade:    typeof renderFidelidade    === 'function' ? renderFidelidade    : null,
+      relatorios:    typeof renderRelatorios    === 'function' ? renderRelatorios    : null,
+      financeiro:    typeof renderFinanceiro    === 'function' ? renderFinanceiro    : null,
+      dashboard:     typeof renderDashboard     === 'function' ? renderDashboard     : null,
+      fichas:        typeof renderFichas        === 'function' ? renderFichas        : null,
+      checklist:     typeof renderChecklists    === 'function' ? renderChecklists    : null,
+      whatsapp:      typeof renderWhatsapp      === 'function' ? renderWhatsapp      : null,
+    };
+    if (renders[nome]) renders[nome]();
+  } catch(e) {
+    console.warn('[GBR Sync] ReRender falhou:', e.message);
+  }
+}
+
+// ── Desativa sync ao fazer logout ───────────────────────────────
+function _gbrDesativarSync() {
+  if (_gbrSyncListeners._main) {
+    try { _gbrSyncListeners._main.off(); } catch(e) {}
+  }
+  _gbrSyncAtivo = false;
+  _gbrSyncListeners = {};
+}
+
 // ════════════════════════════════════════════════════════
 //  GBR LICENSE BRIDGE — Integração Firebase ↔ Console
 // ════════════════════════════════════════════════════════
@@ -2164,6 +2407,12 @@ async function _gbrLoginFirebase(email, senha) {
   // Monitoramento em tempo real de licença
   _gbrMonitorarLicenca(tenantId);
 
+  // ── SINCRONIZAÇÃO MULTI-DEVICE ──────────────────────────────
+  // Ativa o Firebase como fonte única de verdade para dados
+  // operacionais. Resolve: dados criados no mobile não aparecem
+  // no desktop e vice-versa.
+  setTimeout(function() { _gbrAtivarSync(tenantId); }, 500);
+
   // Monitorar notificações enviadas pelo console
   if(_gbrFbDb&&tenantId){
     try{
@@ -2394,6 +2643,24 @@ function salvarDados(){
   });
   if (window.GBR_API_ADAPTER?.save) {
     allKeys.forEach(k => { if(DATA[k]!==undefined)_storage.set(k, DATA[k]).catch(console.warn); });
+  }
+  // ── Firebase Sync: propaga mudanças para todos os devices ──
+  if (_gbrSyncAtivo && currentTenant?.id) {
+    var tid = currentTenant.id;
+    _gbrAtualizarIndicadorSync('saving', 'Salvando...');
+    // Salva apenas as chaves operacionais (não metadados de sessão)
+    var promises = [];
+    _GBR_SYNC_KEYS.forEach(function(k) {
+      if (DATA[k] !== undefined) {
+        promises.push(_gbrFbDb.ref('dados_operacionais/' + tid + '/' + k).set(DATA[k]));
+      }
+    });
+    Promise.all(promises)
+      .then(function() { _gbrAtualizarIndicadorSync('ok', 'Sincronizado'); })
+      .catch(function(e) {
+        console.warn('[GBR Sync] Erro ao salvar dados:', e.message);
+        _gbrAtualizarIndicadorSync('off', 'Erro sync');
+      });
   }
 }
 
@@ -2695,6 +2962,11 @@ function atualizarBadgeNotif(){
 }
 
 function fazerLogout(){
+  // Desativar sync Firebase ao sair
+  if (typeof _gbrDesativarSync === 'function') _gbrDesativarSync();
+  if (typeof _gbrFbAuth !== 'undefined' && _gbrFbAuth) {
+    try { _gbrFbAuth.signOut(); } catch(e) {}
+  }
   localStorage.removeItem('gbr_sessao');
   currentUser=null;currentTenant=null;currentCaixa=null;
   document.getElementById('appShell').style.display='none';
@@ -4930,7 +5202,17 @@ function setAdminTab(tab){
   document.querySelectorAll('.admin-tab').forEach(b=>{if(b.getAttribute('onclick')?.includes("'"+tab+"'"))b.classList.add('active');});
   document.querySelectorAll('.admin-panel').forEach(p=>p.classList.remove('active'));
   const panel=document.getElementById('adminp-'+tab);if(panel)panel.classList.add('active');
-  const renders={acessos:renderAdminAcessos,regras:renderAdminRegras,empresa:renderAdminEmpresa,aparencia:renderAdminAparencia,integracoes:renderAdminIntegracoes,auditoria:renderAuditoria,seguranca:renderSessoesAdmin,'agenda-online':renderAgendaOnline,manual:renderManual};
+  const renders={
+    acessos:renderAdminAcessos,
+    regras:renderAdminRegras,
+    empresa:renderAdminEmpresa,
+    aparencia:renderAdminAparencia,
+    integracoes:renderAdminIntegracoes,
+    auditoria:renderAuditoria,
+    seguranca:function(){ renderSessoesAdmin(); setTimeout(renderStatusSync,150); },
+    'agenda-online':renderAgendaOnline,
+    manual:renderManual
+  };
   renders[tab]?.();
 }
 
@@ -4939,6 +5221,51 @@ function renderAdminPage(){
 }
 
 // ── Sessões Admin ──────────────────────────────────────────
+function renderStatusSync() {
+  // Renderiza card de status de sync no painel admin
+  var el = document.getElementById('syncStatusCard');
+  if (!el) return;
+  var ativo = _gbrSyncAtivo;
+  var tid = currentTenant?.id || '—';
+  el.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' +
+      '<div style="width:42px;height:42px;border-radius:10px;background:' + (ativo ? 'rgba(16,185,129,.1)' : 'rgba(255,255,255,.06)') + ';display:flex;align-items:center;justify-content:center;font-size:20px">' + (ativo ? '🟢' : '⚫') + '</div>' +
+      '<div><div style="font-weight:600;font-size:14px">' + (ativo ? 'Sincronização Ativa' : 'Sincronização Inativa') + '</div>' +
+      '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + (ativo ? 'Dados sincronizando em tempo real com Firebase' : 'Sistema operando em modo local (localStorage)') + '</div></div>' +
+    '</div>' +
+    '<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;color:var(--text2);margin-bottom:12px">' +
+      'Nó: <b style="color:var(--text)">dados_operacionais/' + tid + '</b><br>' +
+      'Firebase: <b style="color:' + (_gbrFbDb ? 'var(--green)' : 'var(--red)') + '">' + (_gbrFbDb ? 'Conectado' : 'Desconectado') + '</b><br>' +
+      'Status: <b>' + (ativo ? '✅ Ativo' : '❌ Inativo') + '</b>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button class="btn btn-primary btn-sm" onclick="_gbrForceSyncNow()">' +
+        (ativo ? '🔄 Forçar Re-sync' : '▶ Ativar Sync') +
+      '</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="_gbrEnviarLocalStorageParaFirebase(\'' + tid + '\');toast(\'Dados locais enviados ao Firebase!\',\'success\')">' +
+        '⬆ Enviar dados locais' +
+      '</button>' +
+      (!ativo ? '<div style="font-size:11px;color:var(--accent);padding:8px 0;width:100%">⚠ Se o sync não ativar, verifique as <b>Regras do Firebase</b> no Console e aplique o Template "GBR Padrão".</div>' : '') +
+    '</div>';
+}
+
+function _gbrForceSyncNow() {
+  var tid = currentTenant?.id;
+  if (!tid) return toast('Nenhuma estética logada', 'error');
+  if (_gbrSyncAtivo) {
+    // Já ativo — apenas forçar re-leitura
+    _gbrSyncAtivo = false;
+    if (_gbrSyncListeners._main) {
+      try { _gbrSyncListeners._main.off(); } catch(e) {}
+    }
+  }
+  toast('🔄 Reconectando sync...', 'success');
+  setTimeout(function() {
+    _gbrAtivarSync(tid);
+    setTimeout(function() { renderStatusSync(); }, 1500);
+  }, 300);
+}
+
 function renderSessoesAdmin(){
   const el=document.getElementById('sessoesLista');if(!el)return;
   const sessoes=(DATA._sessoes||[]);
