@@ -2915,7 +2915,7 @@ function renderAgenda(){
           // Evento que inicia nesta hora — card completo clicável
           html+='<div class="slot-event '+a.status+'" '
             +'style="flex:1;min-width:0;cursor:pointer" '
-            +'onclick="event.stopPropagation();abrirEditarAgendamento(''+a.id+'')" '
+            +'onclick="event.stopPropagation();abrirEditarAgendamento(\'' +a.id+ '\')" '
             +'title="'+statusLabel(a.status)+' — clique para editar">'
             +'<strong style="font-size:11px">'+(cli?.nome_completo?.split(' ')[0]||'-')+'</strong>'
             +'<br><span style="font-size:10px;opacity:.8">'+(serv?.nome||'')+'</span>'
@@ -4415,7 +4415,7 @@ function renderAgendaSemana(){
         const corMap={agendado:'rgba(59,130,246,.2)',em_andamento:'rgba(245,158,11,.2)',concluido:'rgba(16,185,129,.2)',cancelado:'rgba(239,68,68,.2)'};
         html+='<div class="semana-evento" '
           +'style="background:'+(corMap[a.status]||corMap.agendado)+';color:var(--text);cursor:pointer" '
-          +'onclick="abrirEditarAgendamento(''+a.id+'')" '
+          +'onclick="abrirEditarAgendamento(\'' +a.id+ '\')" '
           +'title="'+statusLabel(a.status)+' — clique para editar">'
           +(((cli?.nome_completo||'-').split(' ')[0]))
           +'</div>';
