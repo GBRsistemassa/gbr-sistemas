@@ -1929,8 +1929,8 @@ function _gbrModalUpgrade(pageId) {
 //  Firebase 100% removido. Fonte única de verdade: Supabase.
 // ══════════════════════════════════════════════════════════════════════
 
-var GBR_SB_URL  = 'https://ogzqgnatdtxyeytrdizb.supabase.co';
-var GBR_SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nenFnbmF0ZHR4eWV5dHJkaXpiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA2ODQ3MiwiZXhwIjoyMDkxNjQ0NDcyfQ.HO1_qYF5aoPQ58nUkgU3ZkTXYuaXJide7zJGPSn3-d8';
+var GBR_SB_URL  = 'https://pyakgvnvpsssjdewkgci.supabase.co';
+var GBR_SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5YWtndm52cHNzc2pkZXdrZ2NpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjM1OTk1OSwiZXhwIjoyMDkxOTM1OTU5fQ.YifIUfhJPatRieNIaK3-Xt5SjqXBUWP_S3hjVqIpYUk';
 
 var _sb          = null;
 var _sbTenantId  = null;
@@ -2536,34 +2536,7 @@ function seedDados(saEmail, saSenha, empresaNome) {
 // Brute force protection
 const _loginAttempts={};
 
-/* ── Login principal: Firebase Auth primeiro, fallback local ── */
-async function fazerLogin(){
-  const email=document.getElementById('loginEmail').value.trim().toLowerCase();
-  const senha=document.getElementById('loginSenha').value.trim();
-  if(!email||!senha){showLoginMsg('Preencha email e senha','erro');return;}
-
-  // Desabilitar botão durante o processo
-  var btn = document.querySelector('#loginPage button[onclick*="fazerLogin"]') ||
-            document.querySelector('#loginPage .btn-primary');
-  if(btn){ btn.disabled=true; btn.textContent='Verificando...'; }
-  var _reativarBtn = function(){
-    if(btn){ btn.disabled=false; btn.textContent='Entrar'; }
-  };
-
-  try {
-    // 1) Tentar Firebase Auth (usuários cadastrados pelo Console)
-    var fbHandled = await _gbrLoginFirebase(email, senha);
-    if(fbHandled){ _reativarBtn(); return; } // Firebase tratou (sucesso ou erro de licença)
-
-    // 2) Fallback: auth local (superadmin e usuários criados dentro do sistema)
-    _fazerLoginLocal(email, senha);
-  } catch(e) {
-    console.error('[GBR Login]', e);
-    _fazerLoginLocal(email, senha); // em caso de exceção inesperada, tenta local
-  } finally {
-    _reativarBtn();
-  }
-}
+/* ── fazerLogin: implementado acima via Supabase Auth ── */
 
 /* ── Auth local (localStorage) — mantido para retrocompatibilidade ── */
 function _fazerLoginLocal(email, senha){
