@@ -1859,16 +1859,21 @@ var _GBR_MODULO_MAP = {
 // Verifica se um módulo está liberado para o usuário atual
 function _gbrModuloLiberado(pageId) {
   var modSlug = _GBR_MODULO_MAP[pageId];
-  if (modSlug === null || modSlug === undefined) return true; // sem restrição
+  if (modSlug === null || modSlug === undefined) return true; // página sempre liberada (dashboard, config)
   var libs = window._gbrModulosLiberados;
-  if (!libs || !Array.isArray(libs) || libs.length === 0) return true; // sem lista = tudo liberado
+  // null/undefined = ainda carregando OU plano sem restrições (trial inicial) → libera
+  if (libs === null || libs === undefined) return true;
+  // Array vazio = plano não tem módulos configurados → BLOQUEIA (seguro)
+  // Array com itens = verifica se o módulo está na lista
+  if (!Array.isArray(libs)) return true;
+  if (libs.length === 0) return false; // sem módulos definidos = bloqueia
   return libs.indexOf(modSlug) !== -1;
 }
 
 // Aplica/remove cadeados na sidebar conforme plano atual
 function _gbrAplicarPaywall() {
   var libs = window._gbrModulosLiberados;
-  if (!libs || !Array.isArray(libs)) return;
+  if (libs === null || libs === undefined || !Array.isArray(libs)) return;
 
   document.querySelectorAll('.nav-item[onclick]').forEach(function(item) {
     var onclick = item.getAttribute('onclick') || '';
@@ -2001,7 +2006,7 @@ function _gbrReRenderPaginaAtiva() {
 
 function _gbrAplicarPaywall() {
   var libs = window._gbrModulosLiberados;
-  if (!libs || !Array.isArray(libs)) return;
+  if (libs === null || libs === undefined || !Array.isArray(libs)) return;
   document.querySelectorAll('.nav-item[onclick]').forEach(function(item) {
     var m = (item.getAttribute('onclick')||'').match(/showPage\(['"](.*?)['"]/);
     if (!m) return;
@@ -2041,7 +2046,26 @@ async function _sbCarregarTudo(tenantId) {
     });
     if (t.max_vagas)           window._gbrMaxVagas        = t.max_vagas;
     if (t.max_colaboradores)   window._gbrMaxColaboradores = t.max_colaboradores;
-    if (t.modulos_liberados)   window._gbrModulosLiberados = t.modulos_liberados;
+    // Carregar módulos — se vazio no banco, buscar do plano no Supabase
+    if (t.modulos_liberados && t.modulos_liberados.length > 0) {
+      window._gbrModulosLiberados = t.modulos_liberados;
+    } else {
+      // Modulos não definidos no tenant → buscar do plano
+      try {
+        var plSlug = t.plano || t.plano_slug || 'basico';
+        var plRes = await _sb.from('planos').select('modulos_liberados').eq('id', plSlug).maybeSingle();
+        if (plRes.data && plRes.data.modulos_liberados && plRes.data.modulos_liberados.length > 0) {
+          window._gbrModulosLiberados = plRes.data.modulos_liberados;
+          console.log('[GBR] Módulos carregados do plano ' + plSlug + ':', window._gbrModulosLiberados);
+        } else {
+          // Plano não encontrado no banco → usar null (libera tudo como trial)
+          window._gbrModulosLiberados = null;
+          console.warn('[GBR] Plano ' + plSlug + ' não encontrado no banco — modo trial');
+        }
+      } catch(ePlano) {
+        window._gbrModulosLiberados = null;
+      }
+    }
     if (t.nome_exibicao_plano) window._gbrNomePlano        = t.nome_exibicao_plano;
 
     // Carregar dados operacionais do Supabase se existirem
