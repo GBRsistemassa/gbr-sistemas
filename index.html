@@ -1182,6 +1182,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
               <button class="btn btn-success" onclick="exportarXLSX('estoque')">📊 Estoque → Excel</button>
               <button class="btn btn-success" onclick="exportarXLSX('financeiro')">📊 Financeiro → Excel</button>
               <label class="btn btn-secondary" style="cursor:pointer">📤 Importar Dados (JSON)<input type="file" accept=".json" style="display:none" onchange="importarDados(this)"></label>
+              <button class="btn btn-warning" onclick="recuperarDadosNuvem()" style="background:rgba(251,191,36,.15);border:1px solid var(--accent);color:var(--accent)">☁️ Recuperar Dados da Nuvem</button>
             </div>
           </div>
           <div class="card">
@@ -2229,25 +2230,50 @@ async function _sbCarregarTudo(tenantId) {
         }
       } catch(ePl) { window._gbrModulosLiberados = null; }
     }
-    // Carregar dados operacionais do Supabase (fonte de verdade)
+    // ══ CARREGAR TODOS OS DADOS OPERACIONAIS DO SUPABASE (fonte de verdade) ══
+    // FIX: anteriormente só carregava clientes/agendamentos/serviços — produtos,
+    // fichas, regras, caixas e movimentações ficavam só no localStorage e sumiam.
     try {
-      var [rCli, rAg, rSrv] = await Promise.all([
+      var [rCli, rAg, rSrv, rProd, rRegras, rCaixas, rMovFin, rChk, rWaTpl] = await Promise.all([
         _sb.from('clientes').select('*').eq('tenant_id', tenantId).eq('ativo', true),
         _sb.from('agendamentos').select('*').eq('tenant_id', tenantId).neq('status','cancelado').order('data_hora_inicio',{ascending:false}).limit(500),
-        _sb.from('servicos').select('*').eq('tenant_id', tenantId).eq('ativo', true)
+        _sb.from('servicos').select('*').eq('tenant_id', tenantId).eq('ativo', true),
+        _sb.from('produtos').select('*').eq('tenant_id', tenantId).eq('ativo', true),
+        _sb.from('regras_fidelidade').select('*').eq('tenant_id', tenantId).eq('ativo', true),
+        _sb.from('caixas').select('*').eq('tenant_id', tenantId).order('data_abertura',{ascending:false}).limit(100),
+        _sb.from('movimentacoes_financeiras').select('*').eq('tenant_id', tenantId).order('data',{ascending:false}).limit(500),
+        _sb.from('checklists').select('*').eq('tenant_id', tenantId).order('created_at',{ascending:false}).limit(200),
+        _sb.from('wa_templates').select('*').eq('tenant_id', tenantId)
       ]);
-      // Supabase é a fonte de verdade — sempre usar se não houve erro
-      if (!rCli.error && rCli.data !== null) DATA.clientes = rCli.data;
-      if (!rAg.error && rAg.data !== null) DATA.agendamentos = rAg.data;
-      if (!rSrv.error && rSrv.data !== null) DATA.servicos = rSrv.data;
-      
-      // Se Supabase retornou vazio mas localStorage tem dados → MIGRAR
-      var sbVazio = (rCli.data||[]).length === 0 && (rSrv.data||[]).length === 0;
-      var localTemDados = (DATA.clientes.length > 0 || DATA.servicos.length > 0);
-      if (sbVazio && localTemDados) {
-        console.log('[GBR] Supabase vazio, iniciando migração do localStorage...');
-        setTimeout(function(){ _gbrMigrarLocalStorageParaSupabase(tenantId); }, 1000);
-      }
+
+      // Aplicar todos os resultados — Supabase é sempre a fonte de verdade
+      if (!rCli.error   && rCli.data   !== null) DATA.clientes            = rCli.data;
+      if (!rAg.error    && rAg.data    !== null) DATA.agendamentos        = rAg.data;
+      if (!rSrv.error   && rSrv.data   !== null) DATA.servicos            = rSrv.data;
+      if (!rProd.error  && rProd.data  !== null) DATA.produtos            = rProd.data;
+      if (!rRegras.error && rRegras.data !== null) DATA.regras_fidelidade  = rRegras.data;
+      if (!rCaixas.error && rCaixas.data !== null) DATA.caixas             = rCaixas.data;
+      if (!rMovFin.error && rMovFin.data !== null) DATA.movimentacoes_fin  = rMovFin.data;
+      if (!rChk.error   && rChk.data   !== null) DATA.checklists          = rChk.data;
+      if (!rWaTpl.error && rWaTpl.data !== null) DATA.wa_templates        = rWaTpl.data;
+
+      // Carregar fichas técnicas via global_settings (não têm tabela própria)
+      try {
+        var rFichas = await _sb.from('global_settings').select('value').eq('key','fichas_'+tenantId).maybeSingle();
+        if (rFichas.data && rFichas.data.value) {
+          var fichasArr = Array.isArray(rFichas.data.value)
+            ? rFichas.data.value
+            : Object.values(rFichas.data.value);
+          if (fichasArr.length > 0) DATA.fichas = fichasArr;
+        }
+      } catch(eFichas) {}
+
+      // Carregar movimentações de caixa (tabela movimentacoes local)
+      try {
+        var rMovCx = await _sb.from('movimentacoes').select('*').eq('tenant_id', tenantId).order('created_at',{ascending:false}).limit(500);
+        if (!rMovCx.error && rMovCx.data !== null) DATA.movimentacoes = rMovCx.data;
+      } catch(eMovCx) {}
+
       // Tickets
       try {
         var rTk = await _sb.from('global_settings').select('value').eq('key','tickets_'+tenantId).maybeSingle();
@@ -2256,8 +2282,42 @@ async function _sbCarregarTudo(tenantId) {
           if (tkArr.length > 0) DATA.tickets = tkArr;
         }
       } catch(eTk) {}
+
+      // Sincronizar localStorage com o que veio do Supabase (para offline funcionar)
+      ['clientes','agendamentos','servicos','produtos','regras_fidelidade','caixas','checklists','wa_templates'].forEach(function(k) {
+        if (DATA[k] && DATA[k].length > 0) {
+          try { localStorage.setItem('gbr_'+k, JSON.stringify(DATA[k])); } catch(e) {}
+        }
+      });
+
+      // Se Supabase retornou completamente vazio mas localStorage tem dados → MIGRAR
+      var sbVazio = (rCli.data||[]).length === 0 && (rSrv.data||[]).length === 0 && (rProd.data||[]).length === 0;
+      if (sbVazio) {
+        // Verificar localStorage
+        var lsCli = localStorage.getItem('gbr_clientes');
+        var lsSrv = localStorage.getItem('gbr_servicos');
+        var lsProd = localStorage.getItem('gbr_produtos');
+        var localTemDados = (lsCli && JSON.parse(lsCli||'[]').length > 0)
+          || (lsSrv && JSON.parse(lsSrv||'[]').length > 0)
+          || (lsProd && JSON.parse(lsProd||'[]').length > 0);
+        if (localTemDados) {
+          console.log('[GBR] Supabase vazio, iniciando migração do localStorage...');
+          setTimeout(function(){ _gbrMigrarLocalStorageParaSupabase(tenantId); }, 1000);
+        }
+      }
+
     } catch(eOp) {
-      console.warn('[GBR SB] Dados operacionais via localStorage:', eOp.message);
+      console.warn('[GBR SB] Dados operacionais, usando localStorage como fallback:', eOp.message);
+      // Fallback: tentar carregar do localStorage
+      ['clientes','agendamentos','servicos','produtos','regras_fidelidade','caixas','fichas','wa_templates','checklists'].forEach(function(k) {
+        try {
+          var raw = localStorage.getItem('gbr_' + k);
+          if (raw && (!DATA[k] || DATA[k].length === 0)) {
+            var parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) DATA[k] = parsed;
+          }
+        } catch(e) {}
+      });
     }
     _gbrAtualizarIndicadorSync('ok', 'Conectado');
     console.log('[GBR SB] Dados carregados para tenant:', tenantId);
@@ -2292,16 +2352,43 @@ async function _gbrMigrarLocalStorageParaSupabase(tenantId) {
   if (!_sb || !tenantId) return;
   
   var tabelas = [
-    { local: 'clientes',      sb: 'clientes',     campo_tenant: 'tenant_id' },
-    { local: 'agendamentos',  sb: 'agendamentos',  campo_tenant: 'tenant_id' },
-    { local: 'servicos',      sb: 'servicos',      campo_tenant: 'tenant_id' },
-    { local: 'produtos',      sb: 'produtos',      campo_tenant: 'tenant_id' },
+    { local: 'clientes',           sb: 'clientes',                campo_tenant: 'tenant_id' },
+    { local: 'agendamentos',       sb: 'agendamentos',             campo_tenant: 'tenant_id' },
+    { local: 'servicos',           sb: 'servicos',                 campo_tenant: 'tenant_id' },
+    { local: 'produtos',           sb: 'produtos',                 campo_tenant: 'tenant_id' },
+    { local: 'regras_fidelidade',  sb: 'regras_fidelidade',        campo_tenant: 'tenant_id' },
+    { local: 'caixas',             sb: 'caixas',                   campo_tenant: 'tenant_id' },
+    { local: 'checklists',         sb: 'checklists',               campo_tenant: 'tenant_id' },
+    { local: 'wa_templates',       sb: 'wa_templates',             campo_tenant: 'tenant_id' },
   ];
 
   var migrou = false;
+
+  // Migrar fichas técnicas separadamente (via global_settings)
+  try {
+    var localFichas = [];
+    try {
+      var rawF = localStorage.getItem('gbr_fichas');
+      if (rawF) {
+        var parsedF = JSON.parse(rawF);
+        localFichas = Array.isArray(parsedF) ? parsedF : Object.values(parsedF||{});
+      }
+    } catch(ef) {}
+    if (DATA.fichas && DATA.fichas.length > 0) localFichas = DATA.fichas;
+    if (localFichas.length > 0) {
+      var fichasComTenant = localFichas.map(function(f){ return Object.assign({},f,{tenant_id:tenantId}); });
+      var rFichasExist = await _sb.from('global_settings').select('key').eq('key','fichas_'+tenantId).maybeSingle();
+      if (!rFichasExist.data) {
+        await _sb.from('global_settings').upsert({key:'fichas_'+tenantId, value:fichasComTenant, updated_at:new Date().toISOString()},{onConflict:'key'});
+        console.log('[GBR] Migradas ' + fichasComTenant.length + ' fichas técnicas → Supabase');
+        migrou = true;
+      }
+    }
+  } catch(eFm) { console.warn('[GBR] Migração fichas:', eFm.message); }
+
   for (var t of tabelas) {
     try {
-      // Verificar se Supabase já tem dados
+      // Verificar se Supabase já tem dados para esta tabela
       var rCheck = await _sb.from(t.sb).select('id').eq(t.campo_tenant, tenantId).limit(1);
       if (rCheck.data && rCheck.data.length > 0) continue; // já tem dados no SB
 
@@ -4205,6 +4292,101 @@ function carregarPaginaConfig(){
   set('cfgSenhaAdmin',cfg.senha_admin||'');
   const badge=document.getElementById('kmRateBadge');
   if(badge){const vkm=cfg.valor_km_leva_traz;badge.style.display=vkm?'inline-flex':'none';if(vkm)badge.textContent='R$ '+parseFloat(vkm).toFixed(2)+'/km configurado';}
+}
+
+// ══ RECUPERAÇÃO DE DADOS DA NUVEM ══
+// Força recarga de TODOS os dados do Supabase — útil quando dados "sumiam"
+async function recuperarDadosNuvem() {
+  if (!_sbReady || !_sbTenantId) {
+    toast('Sem conexão com a nuvem. Faça login novamente.', 'error'); return;
+  }
+  if (!confirm('Isso vai recarregar TODOS os dados da nuvem (Supabase) para este dispositivo.\n\nDados locais não sincronizados podem ser sobrescritos.\n\nContinuar?')) return;
+
+  toast('☁️ Recuperando dados da nuvem...', 'info');
+  _gbrAtualizarIndicadorSync('saving', 'Recuperando...');
+
+  try {
+    var tid = _sbTenantId;
+    var resultados = {};
+    var erros = [];
+
+    // Buscar todas as tabelas em paralelo
+    var [rCli, rAg, rSrv, rProd, rRegras, rCaixas, rMovFin, rChk, rWaTpl, rMovCx] = await Promise.all([
+      _sb.from('clientes').select('*').eq('tenant_id', tid).eq('ativo', true),
+      _sb.from('agendamentos').select('*').eq('tenant_id', tid).neq('status','cancelado').order('data_hora_inicio',{ascending:false}).limit(500),
+      _sb.from('servicos').select('*').eq('tenant_id', tid).eq('ativo', true),
+      _sb.from('produtos').select('*').eq('tenant_id', tid).eq('ativo', true),
+      _sb.from('regras_fidelidade').select('*').eq('tenant_id', tid).eq('ativo', true),
+      _sb.from('caixas').select('*').eq('tenant_id', tid).order('data_abertura',{ascending:false}).limit(100),
+      _sb.from('movimentacoes_financeiras').select('*').eq('tenant_id', tid).order('data',{ascending:false}).limit(500),
+      _sb.from('checklists').select('*').eq('tenant_id', tid).order('created_at',{ascending:false}).limit(200),
+      _sb.from('wa_templates').select('*').eq('tenant_id', tid),
+      _sb.from('movimentacoes').select('*').eq('tenant_id', tid).order('created_at',{ascending:false}).limit(500)
+    ]);
+
+    var map = [
+      [rCli,    'clientes',           'clientes'],
+      [rAg,     'agendamentos',       'agendamentos'],
+      [rSrv,    'servicos',           'servicos'],
+      [rProd,   'produtos',           'produtos'],
+      [rRegras, 'regras_fidelidade',  'regras_fidelidade'],
+      [rCaixas, 'caixas',             'caixas'],
+      [rMovFin, 'movimentacoes_fin',  'movimentacoes_financeiras'],
+      [rChk,    'checklists',         'checklists'],
+      [rWaTpl,  'wa_templates',       'wa_templates'],
+      [rMovCx,  'movimentacoes',      'movimentacoes']
+    ];
+
+    map.forEach(function(m) {
+      var res = m[0], dataKey = m[1], tabela = m[2];
+      if (res.error) { erros.push(tabela + ': ' + res.error.message); return; }
+      if (res.data !== null) {
+        DATA[dataKey] = res.data;
+        resultados[tabela] = res.data.length;
+        try { localStorage.setItem('gbr_' + dataKey, JSON.stringify(res.data)); } catch(e) {}
+      }
+    });
+
+    // Fichas técnicas via global_settings
+    try {
+      var rFichas = await _sb.from('global_settings').select('value').eq('key','fichas_'+tid).maybeSingle();
+      if (rFichas.data && rFichas.data.value) {
+        var fichasArr = Array.isArray(rFichas.data.value) ? rFichas.data.value : Object.values(rFichas.data.value);
+        DATA.fichas = fichasArr;
+        resultados['fichas'] = fichasArr.length;
+        try { localStorage.setItem('gbr_fichas', JSON.stringify(fichasArr)); } catch(e) {}
+      }
+    } catch(ef) { erros.push('fichas: ' + ef.message); }
+
+    // Tickets
+    try {
+      var rTk = await _sb.from('global_settings').select('value').eq('key','tickets_'+tid).maybeSingle();
+      if (rTk.data && rTk.data.value) DATA.tickets = Object.values(rTk.data.value);
+    } catch(etk) {}
+
+    _gbrAtualizarIndicadorSync('ok', 'Conectado');
+
+    // Montar resumo
+    var totalReg = Object.values(resultados).reduce(function(s,n){ return s+n; }, 0);
+    var resumo = Object.entries(resultados).filter(function(kv){ return kv[1]>0; })
+      .map(function(kv){ return kv[0]+': '+kv[1]; }).join(', ');
+
+    if (erros.length) console.warn('[GBR] recuperarDadosNuvem erros:', erros);
+
+    toast('✅ ' + totalReg + ' registros recuperados! (' + (resumo||'nenhum dado encontrado') + ')', 'success');
+    logAuditoria('Recuperou Dados da Nuvem', totalReg + ' registros');
+
+    // Re-renderizar a página ativa
+    setTimeout(function(){
+      try { _gbrReRenderPaginaAtiva(); } catch(e) {}
+      try { renderDashboard(); } catch(e) {}
+    }, 300);
+
+  } catch(e) {
+    _gbrAtualizarIndicadorSync('off', 'Erro');
+    toast('Erro ao recuperar: ' + e.message, 'error');
+    console.error('[GBR] recuperarDadosNuvem:', e);
+  }
 }
 
 function exportarDados(){
@@ -7287,6 +7469,27 @@ function salvarDados() {
     if(DATA[k]===undefined) return;
     try { localStorage.setItem('gbr_'+k, JSON.stringify(DATA[k])); } catch(e) {}
   });
+  // FIX: sincronizar fichas técnicas no Supabase (ficam em global_settings)
+  _sbSyncFichas();
+}
+
+// Sincroniza fichas técnicas no Supabase via global_settings
+var _fichasSyncTimer = null;
+function _sbSyncFichas() {
+  if (!_sbReady || !_sbTenantId || !DATA.fichas || DATA.fichas.length === 0) return;
+  // Debounce: aguarda 1.5s sem novas chamadas antes de enviar
+  clearTimeout(_fichasSyncTimer);
+  _fichasSyncTimer = setTimeout(async function() {
+    try {
+      var fichasDoTenant = DATA.fichas.filter(function(f){ return !f.tenant_id || f.tenant_id === _sbTenantId; });
+      if (!fichasDoTenant.length) return;
+      await _sb.from('global_settings').upsert({
+        key: 'fichas_' + _sbTenantId,
+        value: fichasDoTenant,
+        updated_at: new Date().toISOString()
+      }, {onConflict: 'key'});
+    } catch(e) { console.warn('[GBR] sync fichas:', e.message); }
+  }, 1500);
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
