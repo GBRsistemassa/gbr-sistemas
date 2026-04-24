@@ -697,7 +697,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
         <div class="logo-box">GBR</div>
         <div class="logo-info"><div class="logo-name">GBR Sistemas</div><div class="logo-ver">v5.0 Profissional</div></div>
       </div>
-      <div class="tenant-pill"><strong id="tenantNome">Carregando...</strong><span id="tenantSub"></span></div>
+      <div class="tenant-pill"><strong id="tenantNome">Carregando...</strong><span id="tenantSub"></span><span id="tenantPlanoBadge" class="badge-plano" style="display:none"></span></div>
     </div>
     <nav class="nav" id="navMenu">
       <div class="nav-label">Principal</div>
@@ -2178,6 +2178,14 @@ function loginSucesso(user){
     }
   }
   verificarCaixa();
+  // BUG FIX: atualizar indicador de sync e badge de plano após login
+  if(_sbReady) _gbrAtualizarIndicadorSync('ok', 'Conectado');
+  var planoBadgeEl = document.getElementById('tenantPlanoBadge');
+  if(planoBadgeEl && currentTenant) {
+    var nomePlano = window._gbrNomePlano || currentTenant.plano_nome || 'Plano';
+    planoBadgeEl.textContent = nomePlano;
+    planoBadgeEl.style.display = '';
+  }
   try{carregarAparenciaTenant();}catch(e){console.warn('[GBR] aparência:',e);}
   atualizarFidAlerts();
   try{_registrarSessao(user);}catch(e){console.warn('[GBR] sessao:',e);}
