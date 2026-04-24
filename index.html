@@ -6628,6 +6628,32 @@ async function processarCSVEstoque(csvText) {
   toast('✅ '+importados+' produtos importados, '+atualizados+' atualizados!'+(erros?' ⚠️ '+erros+' erros.':''),'success');
 }
 
+function carregarDados(){
+  // Carregamento síncrono via localStorage — todas as chaves unificadas
+  const allKeys=[...Object.keys(DATA),'movimentacoes_fin','tickets','auditoria','configuracoes','permissoes'];
+  allKeys.forEach(k => {
+    try { const d = localStorage.getItem('gbr_' + k); if (d) DATA[k] = JSON.parse(d); }
+    catch(e) { console.warn('[GBR] Erro ao carregar chave:', k, e); }
+  });
+  if (DATA.tenants.length === 0 || DATA.users.length === 0) {
+    // Sem dados locais: ir direto para login (acesso concedido só pelo admin)
+    const lp = document.getElementById('loginPage');
+    if (lp) lp.style.display = 'flex';
+    return;
+  }
+  const sessao = localStorage.getItem('gbr_sessao');
+  if (sessao) {
+    try {
+      const s = JSON.parse(sessao);
+      const u = DATA.users.find(x => x.id === s.userId);
+      if (u && u.ativo) { loginSucesso(u); return; }
+    } catch(e) { localStorage.removeItem('gbr_sessao'); }
+  }
+  // Sem sessão ativa: exibir tela de login
+  const lp = document.getElementById('loginPage');
+  if (lp) lp.style.display = 'flex';
+}
+
 document.addEventListener('DOMContentLoaded',()=>{
   setTimeout(()=>{
     if(!DATA.fichas)DATA.fichas=[];
