@@ -2178,6 +2178,8 @@ function loginSucesso(user){
   try{carregarAparenciaTenant();}catch(e){console.warn('[GBR] aparência:',e);}
   atualizarFidAlerts();
   try{_registrarSessao(user);}catch(e){console.warn('[GBR] sessao:',e);}
+  // BUG FIX: Carregar notificações do Supabase ao logar
+  setTimeout(function(){ try{ carregarNotificacoes(); }catch(e){} }, 1200);
   showPage('dashboard');
 }
 
@@ -5297,13 +5299,47 @@ function exportarExcel(){
 function importarDados(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
-  reader.onload=e=>{
+  reader.onload=async function(e){
     try{
       const backup=JSON.parse(e.target.result);
-      if(!backup.clientes&&!backup.servicos){toast('Arquivo inválido','error');return;}
-      if(!confirm('Isso irá mesclar os dados. Continuar?'))return;
-      Object.keys(backup).forEach(k=>{if(Array.isArray(DATA[k]))DATA[k]=[...DATA[k],...(backup[k]||[]).filter(x=>!DATA[k].find(y=>y.id===x.id))];});
-      logAuditoria('Importou Dados',file.name);salvarDados();toast('Dados importados!','success');
+      if(!backup.clientes&&!backup.servicos){toast('Arquivo inválido — precisa ter clientes ou serviços','error');return;}
+      if(!confirm('Isso irá mesclar os dados com os existentes. Continuar?'))return;
+
+      // ── BUG FIX: mesclar dados e subir para Supabase se disponível ──
+      const tabelasSb=['clientes','agendamentos','servicos','produtos','regras_fidelidade'];
+      Object.keys(backup).forEach(k=>{
+        if(Array.isArray(DATA[k])){
+          DATA[k]=[...DATA[k],...(backup[k]||[]).filter(x=>!DATA[k].find(y=>y.id===x.id))];
+        }
+      });
+
+      logAuditoria('Importou Dados',file.name);
+      salvarDados(); // salva no localStorage
+
+      if(_sbReady && _sbTenantId){
+        toast('Importando para a nuvem...','info');
+        let ok=0, erros=0;
+        for(const tb of tabelasSb){
+          if(!backup[tb]||!backup[tb].length)continue;
+          const registros=backup[tb].map(function(r){
+            return Object.assign({},r,{tenant_id:_sbTenantId});
+          });
+          // Upsert em lotes de 50
+          for(let i=0;i<registros.length;i+=50){
+            const lote=registros.slice(i,i+50);
+            const r=await _sb.from(tb).upsert(lote,{onConflict:'id',ignoreDuplicates:false});
+            if(r.error){erros++;console.warn('[GBR importar]',tb,r.error.message);}
+            else ok+=lote.length;
+          }
+        }
+        if(erros===0){
+          toast('✅ '+ok+' registros importados para a nuvem!','success');
+        } else {
+          toast('⚠️ '+ok+' importados, '+erros+' erros (veja console)','warn');
+        }
+      } else {
+        toast('Dados importados localmente! (Supabase offline)','success');
+      }
     }catch(err){toast('Erro ao importar: '+err.message,'error');}
   };
   reader.readAsText(file);input.value='';
@@ -6170,6 +6206,59 @@ window.GBR_API = (function() {
 
   // ── Listener postMessage (console externo → sistema) ────────────────────
   window.addEventListener('message', function(evt) {
+    // ── BUG FIX: Tratar mensagens do CMS (type-based, sem gbr flag) ──
+    if (evt.data && evt.data.type === 'cms_auto_login') {
+      var tid = evt.data.tenantId;
+      if (!tid || _sbTenantId) return; // já logado ou sem tenant
+      // Login automático via Supabase session existente
+      (async function() {
+        try {
+          var sess = await _sb.auth.getSession();
+          if (sess.data && sess.data.session) {
+            _sbUserId = sess.data.session.user.id;
+            _sbUserEmail = sess.data.session.user.email;
+          }
+          var tenantObj = await _sbCarregarTudo(tid);
+          if (!tenantObj) return;
+          _sbTenantId = tid;
+          var fbTenant = {id:tid, nome:tenantObj.nome||tid,
+            slug:(tenantObj.nome||tid).toLowerCase().replace(/[^a-z0-9]/g,'-'),
+            data_expiracao:tenantObj.expiracao||null,
+            ativo:tenantObj.status_licenca!=='inativo',
+            plano_nome:tenantObj.nome_exibicao_plano||tenantObj.plano||'basico', _sbData:tenantObj};
+          var roleNorm = 'woner';
+          var fbUser = {id:tid+'__cms_admin', email:_sbUserEmail||'admin@gbr',
+            nome:tenantObj.responsavel||tenantObj.nome||'Admin',
+            role:roleNorm, tenant_id:tid,
+            password:'__supabase__', must_change_password:false, ativo:true, _sbFromSB:true};
+          var tIdx=DATA.tenants.findIndex(function(t){return t.id===tid;});
+          if(tIdx>=0) DATA.tenants[tIdx]=fbTenant; else DATA.tenants.push(fbTenant);
+          var uIdx=DATA.users.findIndex(function(u){return u.id===fbUser.id;});
+          if(uIdx>=0) DATA.users[uIdx]=fbUser; else DATA.users.push(fbUser);
+          loginSucesso(fbUser);
+          _sbAtivarRealtime(tid);
+          if(tenantObj.aparencia) _gbrCarregarPersonalizacoes(tid,{style:tenantObj.aparencia});
+        } catch(e) { console.warn('[GBR CMS auto-login]', e.message); }
+      })();
+      return;
+    }
+    if (evt.data && evt.data.type === 'cms_style_preview') {
+      var d = evt.data;
+      if(d.ac)  document.documentElement.style.setProperty('--accent', d.ac);
+      if(d.ac2) document.documentElement.style.setProperty('--accent2', d.ac2);
+      if(d.bg)  document.documentElement.style.setProperty('--bg', d.bg);
+      return;
+    }
+    if (evt.data && evt.data.type === 'cms_css_preview') {
+      var styleEl = document.getElementById('_gbr_cms_css') || document.createElement('style');
+      styleEl.id = '_gbr_cms_css'; styleEl.textContent = evt.data.css||'';
+      if (!styleEl.parentNode) document.head.appendChild(styleEl);
+      return;
+    }
+    if (evt.data && evt.data.type === 'cms_js_exec') {
+      try { new Function(evt.data.js)(); } catch(e) { console.warn('[GBR CMS JS]', e.message); }
+      return;
+    }
     if (!evt.data || !evt.data.gbr || evt.data.response) return;
     const { action, payload, reqId } = evt.data;
 
@@ -6839,10 +6928,59 @@ function carregarDados(){
     try { const d = localStorage.getItem('gbr_' + k); if (d) DATA[k] = JSON.parse(d); }
     catch(e) { console.warn('[GBR] Erro ao carregar chave:', k, e); }
   });
+
+  // ── BUG FIX: Se localStorage sem sessão mas Supabase pode ter sessão ativa ──
+  // Isso resolve o problema de "dados sumiram" em outro dispositivo ou após limpar cache
+  if (_sbReady) {
+    _sb.auth.getSession().then(function(res) {
+      if (res.data && res.data.session && res.data.session.user) {
+        var u = res.data.session.user;
+        // Só continua se não há sessão local ativa
+        if (currentUser) return;
+        _sbUserId    = u.id;
+        _sbUserEmail = u.email;
+        _sb.from('user_tenants').select('tenant_id,role').eq('user_id', u.id).eq('ativo', true).single()
+          .then(function(utRes) {
+            if (utRes.error || !utRes.data) return;
+            _sbTenantId = utRes.data.tenant_id;
+            _sbCarregarTudo(_sbTenantId).then(function(tenantObj) {
+              if (!tenantObj) return;
+              var roleNorm = ({woner:'woner',owner:'woner',admin:'admin',operador:'operador'})[utRes.data.role] || utRes.data.role;
+              var fbTenant = {id:_sbTenantId, nome:tenantObj.nome||_sbTenantId,
+                slug:(tenantObj.nome||_sbTenantId).toLowerCase().replace(/[^a-z0-9]/g,'-'),
+                data_expiracao:tenantObj.expiracao||null, ativo:tenantObj.status_licenca!=='inativo',
+                plano_nome:tenantObj.nome_exibicao_plano||tenantObj.plano||'basico', _sbData:tenantObj};
+              var fbUser = {id:_sbTenantId+'__'+_sbUserId, email:u.email,
+                nome:tenantObj.responsavel||tenantObj.nome||u.email.split('@')[0],
+                role:roleNorm, tenant_id:_sbTenantId,
+                password:'__supabase__', must_change_password:false, ativo:true, _sbFromSB:true};
+              var tIdx=DATA.tenants.findIndex(function(t){return t.id===_sbTenantId;});
+              if(tIdx>=0) DATA.tenants[tIdx]=fbTenant; else DATA.tenants.push(fbTenant);
+              var uIdx=DATA.users.findIndex(function(u2){return u2.id===fbUser.id;});
+              if(uIdx>=0) DATA.users[uIdx]=fbUser; else DATA.users.push(fbUser);
+              loginSucesso(fbUser);
+              _sbAtivarRealtime(_sbTenantId);
+              if(tenantObj.aparencia) _gbrCarregarPersonalizacoes(_sbTenantId,{style:tenantObj.aparencia});
+            });
+          });
+        return; // aguarda async acima
+      }
+      // Sem sessão Supabase — mostrar login normalmente
+      if (!currentUser) {
+        var lp = document.getElementById('loginPage');
+        if (lp) lp.style.display = 'flex';
+      }
+    }).catch(function() {
+      var lp = document.getElementById('loginPage');
+      if (lp && !currentUser) lp.style.display = 'flex';
+    });
+  }
+
   if (DATA.tenants.length === 0 || DATA.users.length === 0) {
-    // Sem dados locais: ir direto para login (acesso concedido só pelo admin)
-    const lp = document.getElementById('loginPage');
-    if (lp) lp.style.display = 'flex';
+    if (!_sbReady) {
+      const lp = document.getElementById('loginPage');
+      if (lp) lp.style.display = 'flex';
+    }
     return;
   }
   const sessao = localStorage.getItem('gbr_sessao');
@@ -6853,9 +6991,11 @@ function carregarDados(){
       if (u && u.ativo) { loginSucesso(u); return; }
     } catch(e) { localStorage.removeItem('gbr_sessao'); }
   }
-  // Sem sessão ativa: exibir tela de login
-  const lp = document.getElementById('loginPage');
-  if (lp) lp.style.display = 'flex';
+  // Sem sessão local ativa — Supabase async acima cuida do resto
+  if (!_sbReady) {
+    const lp = document.getElementById('loginPage');
+    if (lp) lp.style.display = 'flex';
+  }
 }
 
 
@@ -6934,8 +7074,113 @@ function mostrarSolicitarAcesso() {
   if (sp) { sp.style.display = 'flex'; const m=document.getElementById('setupMsg'); if(m){m.style.display='none';m.textContent='';} }
 }
 
+// ═══════════════════════════════════════════════════════
+// BUG FIX: Variáveis e funções de notificação ausentes
+// ═══════════════════════════════════════════════════════
+var _notifCache = [];
+var _notifAberto = false;
+
+async function carregarNotificacoes() {
+  if (!_sbReady || !currentTenant) return;
+  try {
+    var r = await _sb.from('notifications')
+      .select('*')
+      .eq('tenant_id', currentTenant.id)
+      .eq('ativo', true)
+      .order('created_at', {ascending: false})
+      .limit(50);
+    if (r.error) { console.warn('[GBR] notif carregar:', r.error.message); return; }
+    _notifCache = (r.data || []).map(function(n) {
+      return {
+        id: n.id,
+        titulo: n.titulo || '',
+        mensagem: n.mensagem || '',
+        tipo: n.tipo || 'info',
+        lida: n.lido || n.lida || false,
+        ts: n.created_at ? new Date(n.created_at).getTime() : Date.now()
+      };
+    });
+    renderNotifLista();
+    atualizarBadgeNotif();
+    // Mostrar popup para notificações não lidas (prioridade alta/alerta)
+    var naoLidas = _notifCache.filter(function(n){ return !n.lida; });
+    if (naoLidas.length > 0) {
+      var urgente = naoLidas.find(function(n){ return n.tipo==='alerta'||n.tipo==='err'; });
+      if (urgente) _mostrarPopupNotif(urgente);
+    }
+  } catch(e) { console.warn('[GBR] carregarNotificacoes:', e.message); }
+}
+
+function renderNotifLista() {
+  var lista = document.getElementById('notifLista');
+  if (!lista) return;
+  if (!_notifCache.length) {
+    lista.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text3);font-size:12px">Nenhuma notificação</div>';
+    return;
+  }
+  var cores = {info:'var(--blue)',ok:'var(--green)',aviso:'var(--accent)',alerta:'var(--red)',err:'var(--red)'};
+  lista.innerHTML = _notifCache.map(function(n) {
+    var cor = cores[n.tipo] || 'var(--blue)';
+    var dt = n.ts ? new Date(n.ts).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    return '<div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;'+(n.lida?'opacity:.6':'')+'" onclick="_marcarLida(\''+n.id+'\')">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+      + (n.lida?'':'<span style="width:7px;height:7px;border-radius:50%;background:'+cor+';display:inline-block;flex-shrink:0"></span>')
+      + '<span style="font-size:12px;font-weight:600;color:'+(n.lida?'var(--text2)':'var(--text)')+'">'+_escHtmlNotif(n.titulo)+'</span>'
+      + '<span style="margin-left:auto;font-size:10px;color:var(--text3)">'+dt+'</span>'
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--text2);line-height:1.5">'+_escHtmlNotif(n.mensagem)+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+function _escHtmlNotif(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function atualizarBadgeNotif() {
+  var badge = document.getElementById('notifBadge');
+  var n = _notifCache.filter(function(x){ return !x.lida; }).length;
+  if (badge) {
+    badge.textContent = n > 0 ? (n > 9 ? '9+' : n) : '';
+    badge.style.display = n > 0 ? 'flex' : 'none';
+  }
+}
+
+function _marcarLida(notifId) {
+  var n = _notifCache.find(function(x){ return x.id===notifId; });
+  if (n && !n.lida) {
+    n.lida = true;
+    if (_sbReady && currentTenant) {
+      _sb.from('notifications').update({lido:true,lida:true}).eq('id',notifId).catch(function(){});
+    }
+    renderNotifLista();
+    atualizarBadgeNotif();
+  }
+}
+
+function _mostrarPopupNotif(notif) {
+  var existing = document.getElementById('_gbr_popup_notif');
+  if (existing) return; // já tem popup aberto
+  var tipos = {info:'💡',ok:'✅',aviso:'⚠️',alerta:'🚨',err:'❌'};
+  var cores = {info:'var(--blue)',ok:'var(--green)',aviso:'var(--accent)',alerta:'var(--red)',err:'var(--red)'};
+  var cor = cores[notif.tipo]||'var(--blue)';
+  var pop = document.createElement('div');
+  pop.id = '_gbr_popup_notif';
+  pop.style.cssText = 'position:fixed;top:70px;right:16px;z-index:8000;background:var(--bg2);border:1px solid '+cor+';border-radius:12px;padding:16px;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:toastIn .3s ease';
+  pop.innerHTML = '<div style="display:flex;align-items:flex-start;gap:10px">'
+    + '<span style="font-size:18px">'+(tipos[notif.tipo]||'🔔')+'</span>'
+    + '<div style="flex:1">'
+    + '<div style="font-size:13px;font-weight:600;margin-bottom:4px">'+_escHtmlNotif(notif.titulo)+'</div>'
+    + '<div style="font-size:12px;color:var(--text2);line-height:1.5">'+_escHtmlNotif(notif.mensagem)+'</div>'
+    + '</div>'
+    + '<button onclick="this.closest(\'#_gbr_popup_notif\').remove()" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:18px;line-height:1;padding:0 0 0 4px">&times;</button>'
+    + '</div>';
+  document.body.appendChild(pop);
+  setTimeout(function(){ if(pop.parentNode) pop.remove(); }, 8000);
+  _marcarLida(notif.id);
+}
+
 function toggleNotifPanel(){
   var panel = document.getElementById('notifPanel');
+  if (!panel) return;
   _notifAberto = !_notifAberto;
   panel.style.display = _notifAberto ? 'block' : 'none';
   if(_notifAberto) carregarNotificacoes();
