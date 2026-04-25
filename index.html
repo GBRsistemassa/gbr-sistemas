@@ -2305,6 +2305,32 @@ async function _sbCarregarTudo(tenantId) {
       if (!rChk.error   && rChk.data   !== null) DATA.checklists          = rChk.data;
       if (!rWaTpl.error && rWaTpl.data !== null) DATA.wa_templates        = rWaTpl.data;
 
+      // ── Carregar TODOS os colaboradores do tenant para exibir na lista de usuários ──
+      try {
+        var rColabs = await _sb.from('user_tenants')
+          .select('user_id,role,email_cache,nome,ativo,criado_em')
+          .eq('tenant_id', tenantId)
+          .eq('ativo', true);
+        if (!rColabs.error && rColabs.data) {
+          rColabs.data.forEach(function(ut) {
+            var fbU = {
+              id: tenantId + '__' + ut.user_id,
+              email: ut.email_cache || '',
+              nome: ut.nome || ut.email_cache || 'Usuário',
+              role: ({woner:'woner',owner:'woner',admin:'admin',operador:'operador',dono:'woner'})[ut.role] || ut.role,
+              tenant_id: tenantId,
+              password: '__supabase__',
+              must_change_password: false,
+              ativo: ut.ativo !== false,
+              created_at: ut.criado_em || new Date().toISOString(),
+              _sbFromSB: true, _sbUserId: ut.user_id
+            };
+            var idx = DATA.users.findIndex(function(u){ return u.id === fbU.id; });
+            if (idx >= 0) DATA.users[idx] = fbU; else DATA.users.push(fbU);
+          });
+        }
+      } catch(eColab) { console.warn('[GBR] Carregar colaboradores:', eColab.message); }
+
       // Carregar fichas técnicas via global_settings (não têm tabela própria)
       try {
         var rFichas = await _sb.from('global_settings').select('value').eq('key','fichas_'+tenantId).maybeSingle();
@@ -5345,7 +5371,7 @@ function setAdminTab(tab){
   document.querySelectorAll('.admin-panel').forEach(p=>p.classList.remove('active'));
   const panel=document.getElementById('adminp-'+tab);if(panel)panel.classList.add('active');
   const renders={
-    acessos:renderAdminAcessos,
+    acessos:function(){ _sbCarregarColaboradores(); renderAdminAcessos(); },
     regras:renderAdminRegras,
     empresa:renderAdminEmpresa,
     aparencia:renderAdminAparencia,
@@ -5428,6 +5454,32 @@ async function renderSessoesAdmin(){
 }
 
 // ── Acessos ──────────────────────────────────────────────
+async function _sbCarregarColaboradores() {
+  if (!_sbReady || !_sbTenantId) return;
+  try {
+    var r = await _sb.from('user_tenants')
+      .select('user_id,role,email_cache,nome,ativo,criado_em')
+      .eq('tenant_id', _sbTenantId).eq('ativo', true);
+    if (r.error || !r.data) return;
+    r.data.forEach(function(ut) {
+      var fbU = {
+        id: _sbTenantId + '__' + ut.user_id,
+        email: ut.email_cache || '',
+        nome: ut.nome || ut.email_cache || 'Usuário',
+        role: ({woner:'woner',owner:'woner',admin:'admin',operador:'operador',dono:'woner'})[ut.role] || ut.role,
+        tenant_id: _sbTenantId,
+        password: '__supabase__', must_change_password: false,
+        ativo: ut.ativo !== false,
+        created_at: ut.criado_em || new Date().toISOString(),
+        _sbFromSB: true, _sbUserId: ut.user_id
+      };
+      var idx = DATA.users.findIndex(function(u){ return u.id === fbU.id; });
+      if (idx >= 0) DATA.users[idx] = fbU; else DATA.users.push(fbU);
+    });
+    renderAdminAcessos();
+  } catch(e) { console.warn('[GBR] _sbCarregarColaboradores:', e.message); }
+}
+
 function renderAdminAcessos(){
   if(!currentTenant)return;
   const users=DATA.users.filter(u=>u.tenant_id===currentTenant.id&&u.role!=='superadmin');
