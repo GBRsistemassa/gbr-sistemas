@@ -2126,7 +2126,18 @@ var _sbReady     = false;
       realtime: { params: { eventsPerSecond: 20 } }
     });
     _sbReady = true;
-    console.log('[GBR SB] Supabase inicializado.');
+    console.log('[GBR SB] ✅ Supabase inicializado. URL:', GBR_SB_URL);
+    // Diagnóstico: testar conectividade com o banco imediatamente
+    _sb.from('tenants').select('id').limit(1).then(function(r){
+      if (r.error) {
+        console.error('[GBR SB] ❌ Teste de conectividade FALHOU:', r.error.message, '| Código:', r.error.code);
+        if (r.error.code === '42501' || r.status === 403) {
+          console.error('[GBR SB] ❌ RLS bloqueando SELECT em "tenants". Verifique políticas RLS no Supabase.');
+        }
+      } else {
+        console.log('[GBR SB] ✅ Conectividade OK. Banco acessível.');
+      }
+    });
   } catch(e) { console.error('[GBR SB] init:', e.message); }
 })();
 
@@ -2292,27 +2303,32 @@ var _sbColunasRemover = {
   wa_templates: ['created_at']
 };
 async function _sbUpsert(tabela, dados) {
-  if (!_sbReady) return null;
+  if (!_sbReady) { console.warn('[GBR] _sbUpsert ignorado: _sbReady=false. Tabela:', tabela); return null; }
   try {
-    // Sanitizar: remover colunas que o banco gera automaticamente
     var dadosSanitizados = Object.assign({}, dados);
     var remover = _sbColunasRemover[tabela] || [];
     remover.forEach(function(col){ delete dadosSanitizados[col]; });
-
-    // Remover campos nulos/undefined para evitar erros de tipo
     Object.keys(dadosSanitizados).forEach(function(k){
       if (dadosSanitizados[k] === undefined) delete dadosSanitizados[k];
     });
 
     var r = await _sb.from(tabela).upsert(dadosSanitizados, {onConflict:'id', ignoreDuplicates:false});
     if (r.error) {
-      // Tabela inexistente — retornar dados para não quebrar fluxo local
-      if (r.error.code === '42P01' || r.status === 404 || r.status === 403 ||
-          r.error.message.includes('does not exist') || r.error.message.includes('relation')) {
+      // Tabela inexistente (42P01) — não é erro crítico
+      if (r.error.code === '42P01' || r.error.message.includes('does not exist') || r.error.message.includes('relation')) {
         console.warn('[GBR] Tabela não existe ainda:', tabela);
         return dados;
       }
-      // Erro de coluna não encontrada — remover a coluna e tentar novamente
+      // RLS bloqueando (42501 = insufficient_privilege, 403 HTTP)
+      if (r.error.code === '42501' || r.status === 403 || r.error.message.includes('row-level security') || r.error.message.includes('new row violates')) {
+        console.error('[GBR SB] ❌ BLOQUEADO POR RLS na tabela "'+tabela+'"!');
+        console.error('[GBR SB] Erro:', r.error.message, '| Código:', r.error.code);
+        console.error('[GBR SB] Execute o SQL de políticas RLS no Supabase. Ver arquivo gbr_rls_setup.sql');
+        _gbrAtualizarIndicadorSync('off', 'Erro RLS');
+        toast('❌ Erro de permissão ao salvar "'+tabela+'". Verifique as políticas RLS no Supabase.', 'error');
+        return null;
+      }
+      // Coluna não encontrada — remover e retry
       var colMatch = r.error.message.match(/find the '([^']+)' column/);
       if (colMatch) {
         var badCol = colMatch[1];
@@ -2320,37 +2336,49 @@ async function _sbUpsert(tabela, dados) {
         delete dadosSanitizados[badCol];
         if (!_sbColunasRemover[tabela]) _sbColunasRemover[tabela] = [];
         if (!_sbColunasRemover[tabela].includes(badCol)) _sbColunasRemover[tabela].push(badCol);
-        // Retry sem a coluna problemática - usar insert + update como fallback
         var r2 = await _sb.from(tabela).upsert(dadosSanitizados, {onConflict:'id', ignoreDuplicates:false});
         if (r2.error) {
-          // Tentar insert puro
           var r3 = await _sb.from(tabela).insert(dadosSanitizados);
           if (r3.error && !r3.error.message.includes('duplicate') && !r3.error.message.includes('unique')) {
-            console.error('[GBR SB] ERRO retry upsert '+tabela+':', r3.error.message); return null;
+            console.error('[GBR SB] ERRO retry upsert '+tabela+':', r3.error.message, r3.error.code); return null;
           }
         }
         return dados;
       }
-      // Erro de tipo text=uuid: tenant_id é UUID mas recebe TEXT
+      // Erro de tipo text vs uuid
       if (r.error.message.includes('operator does not exist') || r.error.message.includes('text = uuid')) {
         console.error('[GBR SB] ERRO TIPO upsert '+tabela+':', r.error.message);
-        console.error('[GBR] Execute o SQL de correção de schema no Supabase. Ver console.html → pg-deploy');
-        toast('⚠️ Schema do banco desatualizado. Execute o SQL de correção no Supabase.', 'warn');
+        toast('⚠️ Schema desatualizado. Execute o SQL de correção no Supabase.', 'warn');
         return null;
       }
-      console.error('[GBR SB] ERRO upsert '+tabela+':', r.error.message);
+      // Qualquer outro erro — logar completo para diagnóstico
+      console.error('[GBR SB] ERRO upsert "'+tabela+'":', JSON.stringify({
+        message: r.error.message,
+        code: r.error.code,
+        details: r.error.details,
+        hint: r.error.hint,
+        status: r.status,
+        dados: dadosSanitizados
+      }));
       return null;
     }
     return dados;
   } catch(e) {
-    console.error('[GBR SB] EXCEÇÃO upsert '+tabela+':', e.message);
+    console.error('[GBR SB] EXCEÇÃO upsert '+tabela+':', e.message, e.stack);
     return null;
   }
 }
 async function _sbSoftDelete(tabela, id) {
-  if (!_sbReady) return;
+  if (!_sbReady) { console.warn('[GBR] _sbSoftDelete ignorado: _sbReady=false'); return; }
   var r = await _sb.from(tabela).update({ativo:false}).eq('id',id);
-  if (r.error) console.warn('[GBR SB] softDelete '+tabela+':', r.error.message);
+  if (r.error) {
+    console.error('[GBR SB] softDelete "'+tabela+'" id='+id+':', JSON.stringify({
+      message: r.error.message, code: r.error.code, status: r.status
+    }));
+    if (r.error.code === '42501' || r.status === 403) {
+      toast('❌ Sem permissão para desativar em "'+tabela+'". Verifique RLS.', 'error');
+    }
+  }
 }
 async function _sbVerificarVagas(tenantId, inicio, fim, excluirId) {
   if (!_sbReady) {
@@ -3748,21 +3776,29 @@ async function salvarCliente(){
 
   // Supabase upsert (sincroniza todos os devices automaticamente via Realtime)
   if (_sb && _sbTenantId) {
+    console.log('[GBR] salvarCliente: _sbReady='+_sbReady+' _sbTenantId='+_sbTenantId);
     const sbDados = {...dados};
-    // Remover campos sem coluna direta no banco
+    _gbrAtualizarIndicadorSync('saving', 'Salvando...');
     const saved = await _sbUpsert('clientes', sbDados);
-    // Atualizar DATA local imediatamente (feedback visual)
+    // Atualizar DATA local imediatamente (feedback visual otimista)
     const idx2 = DATA.clientes.findIndex(c=>c.id===dados.id);
     if(idx2>=0) Object.assign(DATA.clientes[idx2], dados); else DATA.clientes.push(dados);
     try { localStorage.setItem('gbr_clientes', JSON.stringify(DATA.clientes)); } catch(e) {}
-    if (!saved) {
-      // Erro real de conexão
-      toast('⚠️ Erro ao salvar na nuvem. Tente novamente.', 'warn');
+    if (saved) {
+      _gbrAtualizarIndicadorSync('ok', 'Salvo');
+    } else {
+      // saved=null significa que _sbUpsert retornou erro real — já foi logado e mostrado toast lá
+      // Não chama salvarDados() aqui para não mascarar o problema
+      console.error('[GBR] salvarCliente: upsert retornou null. Dado NÃO foi para o Supabase. Verifique console acima.');
+      _gbrAtualizarIndicadorSync('off', 'Erro ao salvar');
     }
   } else {
+    // Sem conexão Supabase — salvar local e avisar
+    console.warn('[GBR] salvarCliente: sem Supabase (_sbReady='+_sbReady+', _sbTenantId='+_sbTenantId+'). Dados salvos APENAS localmente.');
     const idx2=DATA.clientes.findIndex(c=>c.id===dados.id);
     if(idx2>=0) Object.assign(DATA.clientes[idx2],dados); else DATA.clientes.push(dados);
     salvarDados();
+    toast('⚠️ Sem conexão com a nuvem. Dado salvo localmente.', 'warn');
   }
   if(typeof logAuditoria==='function')logAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente',dados.nome_completo);
   if(_sbTenantId) _sbLogAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente','Clientes',dados.nome_completo);
@@ -3783,7 +3819,20 @@ async function salvarCliente(){
   }
 }
 
-function excluirCliente(id){if(!confirm('Desativar este cliente?'))return;const i=DATA.clientes.findIndex(c=>c.id===id);if(i>=0){DATA.clientes[i].ativo=false;if(_sb&&_sbTenantId)_sbSoftDelete('clientes',id);else salvarDados();renderClientes();toast('Cliente desativado');}}
+function excluirCliente(id){
+  if(!confirm('Desativar este cliente?')) return;
+  const i=DATA.clientes.findIndex(c=>c.id===id);
+  if(i<0) return;
+  DATA.clientes[i].ativo=false;
+  if(_sb && _sbTenantId) {
+    _sbSoftDelete('clientes', id);
+  } else {
+    console.warn('[GBR] excluirCliente: sem Supabase. Soft-delete salvo apenas localmente.');
+    salvarDados();
+  }
+  renderClientes();
+  toast('Cliente desativado');
+}
 
 // ===== SERVIÇOS =====
 function renderServicos(){
