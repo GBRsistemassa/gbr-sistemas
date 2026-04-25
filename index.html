@@ -4081,7 +4081,7 @@ function renderFichaEditor(){
     '<div class="form-group"><label for="maoObraCalc">Tempo do serviço (min)</label>'+
     '<input type="number" value="'+tempoMin+'" min="1" step="5" readonly style="background:var(--bg3);color:var(--text2)">'+
     '<div style="font-size:10px;color:var(--text2);margin-top:2px">Definido no cadastro do serviço</div></div>'+
-    '<div class="form-group"><label for="maoObraCalc">Custo calculado</label>'+
+    '<div class="form-group"><label>Custo calculado</label>'+
     '<div style="font-size:20px;font-weight:700;color:var(--ac);padding-top:4px" id="maoObraCalc">'+fmtMoney(custoMaoObra)+'</div>'+
     '<div style="font-size:10px;color:var(--text2)">= R$'+fmtMoney(valorHora)+'/h ÷ 60 × '+tempoMin+'min</div></div>'+
     '</div></div>';
@@ -4089,7 +4089,7 @@ function renderFichaEditor(){
   // Outros custos
   html += '<div class="card"><div class="card-header"><div class="card-title">Outros Custos</div></div>'+
     '<div class="form-row-3">'+
-    '<div class="form-group"><label for="fichaFixoPct">Desgaste de equipamentos (R$)</label>'+
+    '<div class="form-group"><label for="fichaDesgasteVal">Desgaste de equipamentos (R$)</label>'+
     '<input type="number" value="'+(custoDesg||0)+'" min="0" step="0.01" '+
     'oninput="_fichaAtual.custo_desgaste=+this.value;_recalcFichaSummary();salvarDados()"></div>'+
     '<div class="form-group"><label for="fichaFixoPct">Custo fixo (% sobre preço) <span style="font-size:10px;color:var(--text2)">aluguel+luz÷serviços/mês</span></label>'+
@@ -4489,7 +4489,7 @@ function addItemChk(){
 function renderFotosGrid(){
   const grid=document.getElementById('fotosGrid');
   const thumbs=fotosChk.map((src,i)=>'<div style="position:relative;width:80px;height:80px"><img src="'+src+'" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--border)"><button onclick="fotosChk.splice('+i+',1);renderFotosGrid()" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.7);border:none;color:#fff;border-radius:4px;padding:2px 5px;font-size:11px;cursor:pointer">✕</button></div>').join('');
-  grid.innerHTML=thumbs+'<label for="fotoInput" style="width:80px;height:80px;border:2px dashed var(--border2);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:11px;color:var(--text3);gap:4px" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border2)\'"><span style="font-size:20px">+</span>Foto<input type="file" id="fotoInput" accept="image/*" multiple style="display:none" onchange="adicionarFotos(this)"></label>';
+  grid.innerHTML=thumbs+'<label style="width:80px;height:80px;border:2px dashed var(--border2);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:11px;color:var(--text3);gap:4px" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border2)\'"><span style="font-size:20px">+</span>Foto<input type="file" id="fotoInput" accept="image/*" multiple style="display:none" onchange="adicionarFotos(this)"></label>';
 }
 
 function adicionarFotos(input){
