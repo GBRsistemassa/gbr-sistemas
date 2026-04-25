@@ -4475,75 +4475,76 @@ function carregarPaginaConfig(){
 // Força recarga de TODOS os dados do Supabase — útil quando dados "sumiam"
 // ══ DIAGNÓSTICO DE CONEXÃO SUPABASE ══
 async function diagnosticarConexao() {
-  var html = '<div style="font-family:monospace;font-size:12px;line-height:2">';
-  html += '<b>🔍 Diagnóstico de Conexão com o Servidor</b><br><br>';
+  try {
+    var dh = '<div style="font-family:monospace;font-size:12px;line-height:2">';
+    dh += '<b>🔍 Diagnóstico de Conexão com o Servidor</b><br><br>';
+    dh += (_sbReady ? '✅' : '❌') + ' SDK Supabase: ' + (_sbReady ? 'Inicializado' : 'NÃO INICIALIZADO') + '<br>';
+    dh += (window.GBR_SB_URL ? '✅' : '❌') + ' URL do banco: ' + (window.GBR_SB_URL ? GBR_SB_URL.slice(0,40)+'...' : 'NÃO CONFIGURADA') + '<br>';
+    dh += (_sbUserId ? '✅' : '❌') + ' Usuário autenticado: ' + (_sbUserId || 'NÃO LOGADO') + '<br>';
+    dh += (_sbTenantId ? '✅' : '❌') + ' Empresa vinculada: ' + (_sbTenantId || 'NÃO VINCULADA') + '<br>';
+    dh += 'UUID gerado: ' + uid() + '<br>';
 
-  // 1. Supabase SDK carregado?
-  html += (_sbReady ? '✅' : '❌') + ' SDK Supabase: ' + (_sbReady ? 'Inicializado' : 'NÃO INICIALIZADO') + '<br>';
-
-  // 2. URL e Key configuradas?
-  html += (window.GBR_SB_URL ? '✅' : '❌') + ' URL do banco: ' + (window.GBR_SB_URL ? GBR_SB_URL.slice(0,40)+'...' : 'NÃO CONFIGURADA') + '<br>';
-
-  // 3. Usuário logado?
-  html += (_sbUserId ? '✅' : '❌') + ' Usuário autenticado: ' + (_sbUserId || 'NÃO LOGADO') + '<br>';
-  html += (_sbTenantId ? '✅' : '❌') + ' Empresa vinculada: ' + (_sbTenantId || 'NÃO VINCULADA') + '<br>';
-  if (_sbReady && _sbUserId && !_sbTenantId) {
-    try {
-      var rUT = await _sb.from('user_tenants').select('user_id,tenant_id,role,email_cache,ativo').eq('user_id', _sbUserId);
-      if (rUT.error) html += '&nbsp;&nbsp;❌ user_tenants: ERRO — ' + rUT.error.message + '<br>';
-      else if (!rUT.data || rUT.data.length === 0) html += '&nbsp;&nbsp;❌ user_tenants: SEM VINCULO — usuário não está vinculado a nenhuma estética!<br>&nbsp;&nbsp;💡 Solução: No Console Admin, vincule este usuário a uma estética.<br>';
-      else { html += '&nbsp;&nbsp;✅ user_tenants: ' + rUT.data.length + ' vínculo(s) encontrado(s). Recarregue a página.<br>'; rUT.data.forEach(function(ut){ html += '&nbsp;&nbsp;• tenant: ' + ut.tenant_id + ' | role: ' + ut.role + '<br>'; }); }
-    } catch(eut) {}
-  }
-
-  // 4. Testar leitura
-  if (_sbReady && _sbTenantId) {
-    try {
-      var t1 = Date.now();
-      var r = await _sb.from('clientes').select('id').eq('tenant_id', _sbTenantId).limit(1);
-      var ms = Date.now() - t1;
-      if (r.error) {
-        html += '❌ Leitura de clientes: ERRO — ' + r.error.message + '<br>';
-        html += '&nbsp;&nbsp;💡 Provável causa: Política RLS bloqueando leitura<br>';
-      } else {
-        html += '✅ Leitura de clientes: OK (' + ms + 'ms) — ' + (r.data||[]).length + ' encontrados<br>';
-      }
-    } catch(e) { html += '❌ Leitura: EXCEÇÃO — ' + e.message + '<br>'; }
-
-    // 5. Testar escrita
-    try {
-      var testId = uid();
-      var rW = await _sb.from('clientes').upsert({
-        id: testId, tenant_id: _sbTenantId,
-        nome_completo: '__TESTE_CONEXAO__', ativo: false,
-        created_at: new Date().toISOString()
-      }, {onConflict:'id'}).select().single();
-      if (rW.error) {
-        html += '❌ Escrita de clientes: ERRO — ' + rW.error.message + '<br>';
-        html += '&nbsp;&nbsp;💡 Provável causa: Política RLS bloqueando escrita, ou coluna "id" não é UUID<br>';
-        if (rW.error.message.includes('uuid') || rW.error.message.includes('invalid input')) {
-          html += '&nbsp;&nbsp;🚨 ERRO DE UUID: A tabela exige UUID mas está recebendo outro formato<br>';
+    if (_sbReady && _sbUserId) {
+      try {
+        var rUT = await _sb.from('user_tenants').select('user_id,tenant_id,role,email_cache').eq('user_id', _sbUserId);
+        if (rUT.error) {
+          dh += '❌ user_tenants: ERRO — ' + rUT.error.message + '<br>';
+        } else if (!rUT.data || rUT.data.length === 0) {
+          dh += '❌ user_tenants: SEM VINCULO — usuário não vinculado a nenhuma estética!<br>';
+          dh += '&nbsp;&nbsp;💡 Solução: No Console Admin, vincule este usuário a uma estética.<br>';
+        } else {
+          dh += '✅ user_tenants: ' + rUT.data.length + ' vínculo(s)<br>';
+          rUT.data.forEach(function(ut) {
+            dh += '&nbsp;&nbsp;• tenant: ' + ut.tenant_id + ' | role: ' + ut.role + ' | email: ' + (ut.email_cache||'—') + '<br>';
+          });
         }
-      } else {
-        html += '✅ Escrita de clientes: OK<br>';
-        // Limpar registro de teste
-        await _sb.from('clientes').delete().eq('id', testId);
-        html += '✅ Deleção de teste: OK<br>';
-      }
-    } catch(e) { html += '❌ Escrita: EXCEÇÃO — ' + e.message + '<br>'; }
+      } catch(eUT) { dh += '⚠️ user_tenants: ' + eUT.message + '<br>'; }
+    }
 
-    // 6. Testar realtime
-    html += (_sbChannels && _sbChannels.length > 0 ? '✅' : '❌') + ' Canais Realtime: ' + ((_sbChannels||[]).length) + ' ativos<br>';
+    if (_sbReady && _sbTenantId) {
+      // Teste de leitura
+      try {
+        var t0 = Date.now();
+        var rLeit = await _sb.from('clientes').select('id').eq('tenant_id', _sbTenantId).limit(1);
+        var ms = Date.now() - t0;
+        if (rLeit.error) {
+          dh += '❌ Leitura clientes: ' + rLeit.error.message + '<br>';
+          dh += '&nbsp;&nbsp;💡 Verifique as políticas RLS no Supabase<br>';
+        } else {
+          dh += '✅ Leitura clientes: OK (' + ms + 'ms) — ' + (rLeit.data||[]).length + ' encontrado(s)<br>';
+        }
+      } catch(eLeit) { dh += '❌ Leitura: ' + eLeit.message + '<br>'; }
+
+      // Teste de escrita
+      try {
+        var testId = uid();
+        var rEsc = await _sb.from('clientes').upsert({
+          id: testId, tenant_id: _sbTenantId,
+          nome_completo: '__TESTE__', ativo: false,
+          created_at: new Date().toISOString()
+        }, {onConflict:'id'});
+        if (rEsc.error) {
+          dh += '❌ Escrita clientes: ' + rEsc.error.message + '<br>';
+          if (rEsc.error.message.includes('uuid')) dh += '&nbsp;&nbsp;🚨 ERRO UUID: tipo de coluna incompatível<br>';
+          dh += '&nbsp;&nbsp;💡 Verifique RLS e tipo das colunas no Supabase<br>';
+        } else {
+          dh += '✅ Escrita clientes: OK<br>';
+          await _sb.from('clientes').delete().eq('id', testId);
+        }
+      } catch(eEsc) { dh += '❌ Escrita: ' + eEsc.message + '<br>'; }
+
+      dh += (_sbChannels && _sbChannels.length > 0 ? '✅' : '❌') + ' Canais Realtime: ' + ((_sbChannels||[]).length) + ' ativos<br>';
+    }
+
+    dh += '</div>';
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center';
+    d.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:540px;width:90%;max-height:90vh;overflow-y:auto">' + dh + '<button onclick="document.body.removeChild(this.parentElement.parentElement)" class="btn btn-primary" style="width:100%;margin-top:16px">Fechar</button></div>';
+    document.body.appendChild(d);
+  } catch(eDiag) {
+    alert('Erro ao abrir diagnóstico: ' + eDiag.message);
+    console.error('[GBR] diagnosticarConexao erro:', eDiag);
   }
-
-  html += '<br><b>UUID gerado pelo sistema:</b> ' + uid() + '<br>';
-  html += '</div>';
-
-  // Mostrar diagnóstico
-  var d = document.createElement('div');
-  d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center';
-  d.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:540px;width:90%;max-height:90vh;overflow-y:auto">' + html + '<br><button onclick="this.parentElement.parentElement.remove()" class="btn btn-primary" style="width:100%">Fechar</button></div>';
-  document.body.appendChild(d);
 }
 
 async function recuperarDadosNuvem() {
