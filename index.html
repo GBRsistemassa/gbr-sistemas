@@ -2345,8 +2345,8 @@ async function _sbCarregarTudo(tenantId) {
       try {
         var rColabs = await _sb.from('user_tenants')
           .select('user_id,role,email_cache,nome,ativo,criado_em')
-          .eq('tenant_id', tenantId)
-          .eq('ativo', true);
+          .eq('tenant_id', tenantId);
+        // FIX: sem .eq('ativo',true) — coluna pode não existir
         if (!rColabs.error && rColabs.data) {
           rColabs.data.forEach(function(ut) {
             var fbU = {
@@ -2567,10 +2567,22 @@ async function fazerLogin() {
     _sbUserId    = authRes.data.user.id;
     _sbUserEmail = authRes.data.user.email;
 
+    // FIX: .maybeSingle() não lança erro quando 0 rows; sem .eq('ativo') que pode não existir
     var utRes = await _sb.from('user_tenants')
-      .select('tenant_id, role').eq('user_id', _sbUserId).eq('ativo', true).single();
-    if (utRes.error || !utRes.data) {
-      showLoginMsg('Usuario sem estetica vinculada. Contate o suporte.','erro'); return;
+      .select('tenant_id, role, ativo')
+      .eq('user_id', _sbUserId)
+      .order('criado_em', {ascending: false})
+      .limit(1)
+      .maybeSingle();
+    if (utRes.error) {
+      // Tentar sem order (coluna criado_em pode não existir)
+      utRes = await _sb.from('user_tenants')
+        .select('tenant_id, role')
+        .eq('user_id', _sbUserId)
+        .maybeSingle();
+    }
+    if (!utRes.data) {
+      showLoginMsg('Usuário sem estética vinculada. Contate o administrador.','erro'); return;
     }
     _sbTenantId = utRes.data.tenant_id;
     var tenantObj = await _sbCarregarTudo(_sbTenantId);
@@ -4475,6 +4487,14 @@ async function diagnosticarConexao() {
   // 3. Usuário logado?
   html += (_sbUserId ? '✅' : '❌') + ' Usuário autenticado: ' + (_sbUserId || 'NÃO LOGADO') + '<br>';
   html += (_sbTenantId ? '✅' : '❌') + ' Empresa vinculada: ' + (_sbTenantId || 'NÃO VINCULADA') + '<br>';
+  if (_sbReady && _sbUserId && !_sbTenantId) {
+    try {
+      var rUT = await _sb.from('user_tenants').select('user_id,tenant_id,role,email_cache,ativo').eq('user_id', _sbUserId);
+      if (rUT.error) html += '&nbsp;&nbsp;❌ user_tenants: ERRO — ' + rUT.error.message + '<br>';
+      else if (!rUT.data || rUT.data.length === 0) html += '&nbsp;&nbsp;❌ user_tenants: SEM VINCULO — usuário não está vinculado a nenhuma estética!<br>&nbsp;&nbsp;💡 Solução: No Console Admin, vincule este usuário a uma estética.<br>';
+      else { html += '&nbsp;&nbsp;✅ user_tenants: ' + rUT.data.length + ' vínculo(s) encontrado(s). Recarregue a página.<br>'; rUT.data.forEach(function(ut){ html += '&nbsp;&nbsp;• tenant: ' + ut.tenant_id + ' | role: ' + ut.role + '<br>'; }); }
+    } catch(eut) {}
+  }
 
   // 4. Testar leitura
   if (_sbReady && _sbTenantId) {
@@ -5567,13 +5587,14 @@ async function _sbCarregarColaboradores() {
   if (!_sbReady || !_sbTenantId) return;
   try {
     // Tentar com campos completos, fallback para campos básicos
+    // FIX: sem .eq('ativo',true) — coluna pode não existir no schema atual
     var r = await _sb.from('user_tenants')
       .select('user_id,role,email_cache,nome,ativo,criado_em')
-      .eq('tenant_id', _sbTenantId).eq('ativo', true);
+      .eq('tenant_id', _sbTenantId);
     if (r.error) {
-      // Tentar com menos campos se colunas não existirem
+      // Tentar com menos campos se colunas opcionais não existirem
       r = await _sb.from('user_tenants')
-        .select('user_id,role,ativo')
+        .select('user_id,role,email_cache')
         .eq('tenant_id', _sbTenantId);
     }
     if (r.error || !r.data) return;
@@ -5598,7 +5619,9 @@ async function _sbCarregarColaboradores() {
 
 function renderAdminAcessos(){
   if(!currentTenant)return;
-  const users=DATA.users.filter(u=>u.tenant_id===currentTenant.id&&u.role!=='superadmin');
+  // FIX: carregar do Supabase em tempo real ao invés de DATA.users local
+  // DATA.users só tem o usuário logado; a lista real vem de _sbCarregarColaboradores
+  const users=DATA.users.filter(u=>(u.tenant_id===currentTenant.id||u.tenant_id===_sbTenantId)&&u.role!=='superadmin');
   const tb=document.getElementById('adminUsersTbody');
   if(!tb)return;
   if(!users.length){tb.innerHTML='<tr><td colspan="6" class="empty">Nenhum usuário cadastrado</td></tr>';return;}
@@ -6907,7 +6930,11 @@ function acessarComoTenant(tid) { GBR_API.switchTenant(tid); }
       _sbUserEmail = session.user.email;
       try {
         var utRes = await _sb.from('user_tenants')
-          .select('tenant_id,role').eq('user_id',_sbUserId).eq('ativo',true).single();
+          .select('tenant_id,role').eq('user_id',_sbUserId).maybeSingle();
+        if (utRes.error || !utRes.data) {
+          // Tentar sem filtros extras
+          utRes = await _sb.from('user_tenants').select('tenant_id,role').eq('user_id',_sbUserId).maybeSingle();
+        }
         if (!utRes.data) return;
         _sbTenantId = utRes.data.tenant_id;
         var tenantObj = await _sbCarregarTudo(_sbTenantId);
@@ -7814,7 +7841,7 @@ function carregarDados(){
         if (currentUser) return;
         _sbUserId    = u.id;
         _sbUserEmail = u.email;
-        _sb.from('user_tenants').select('tenant_id,role').eq('user_id', u.id).eq('ativo', true).single()
+        _sb.from('user_tenants').select('tenant_id,role').eq('user_id', u.id).maybeSingle()
           .then(function(utRes) {
             if (utRes.error || !utRes.data) return;
             _sbTenantId = utRes.data.tenant_id;
