@@ -1085,10 +1085,18 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
           <button class="btn btn-danger btn-sm" onclick="abrirMovFinanceiro('saida')">− Saída</button>
         </div>
       </div>
+      <!-- FIX C5: Tabs de período diário/semanal/mensal/anual -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px" id="finPeriodoTabs">
+        <button class="btn btn-sm" id="finTab-hoje" onclick="setFinPeriodo('hoje')" style="background:var(--accent);color:#fff">Hoje</button>
+        <button class="btn btn-secondary btn-sm" id="finTab-semana" onclick="setFinPeriodo('semana')">Semana</button>
+        <button class="btn btn-secondary btn-sm" id="finTab-mes" onclick="setFinPeriodo('mes')">Mês</button>
+        <button class="btn btn-secondary btn-sm" id="finTab-ano" onclick="setFinPeriodo('ano')">Ano</button>
+        <button class="btn btn-secondary btn-sm" id="finTab-custom" onclick="setFinPeriodo('custom')">Personalizado</button>
+      </div>
       <div id="finStats" class="fin-stat-row"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-        <div class="card">
-          <div class="card-header"><div class="card-title">Filtros</div></div>
+        <div class="card" id="finFiltroWrap" style="display:none">
+          <div class="card-header"><div class="card-title">Período Personalizado</div></div>
           <div class="form-row">
             <div class="form-group"><label>De</label><input type="date" id="finDe"></div>
             <div class="form-group"><label>Até</label><input type="date" id="finAte"></div>
@@ -1183,6 +1191,36 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
               <button class="btn btn-success" onclick="exportarXLSX('financeiro')">📊 Financeiro → Excel</button>
               <label class="btn btn-secondary" style="cursor:pointer">📤 Importar Dados (JSON)<input type="file" accept=".json" style="display:none" onchange="importarDados(this)"></label>
               <button class="btn btn-warning" onclick="recuperarDadosNuvem()" style="background:rgba(251,191,36,.15);border:1px solid var(--accent);color:var(--accent)">☁️ Recuperar Dados da Nuvem</button>
+            </div>
+            <!-- Importação por tipo -->
+            <div class="card" style="margin-top:16px">
+              <div class="card-header"><div class="card-title">📥 Importar por Planilha (CSV)</div></div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:4px">
+                <div style="border:1px solid var(--border);border-radius:10px;padding:14px">
+                  <div style="font-weight:600;margin-bottom:4px">📦 Estoque / Produtos</div>
+                  <div style="font-size:11px;color:var(--text2);margin-bottom:10px">Importe produtos, saldos e preços</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="btn btn-secondary btn-sm" onclick="baixarModeloEstoque()">⬇ Baixar Modelo</button>
+                    <label class="btn btn-primary btn-sm" style="cursor:pointer">📂 Importar<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="importarArquivoEstoque(event)"></label>
+                  </div>
+                </div>
+                <div style="border:1px solid var(--border);border-radius:10px;padding:14px">
+                  <div style="font-weight:600;margin-bottom:4px">👥 Clientes</div>
+                  <div style="font-size:11px;color:var(--text2);margin-bottom:10px">Importe sua base de clientes</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="btn btn-secondary btn-sm" onclick="baixarModeloClientes()">⬇ Baixar Modelo</button>
+                    <label class="btn btn-primary btn-sm" style="cursor:pointer">📂 Importar<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="_importarArquivoCSV(event,'clientes')"></label>
+                  </div>
+                </div>
+                <div style="border:1px solid var(--border);border-radius:10px;padding:14px">
+                  <div style="font-weight:600;margin-bottom:4px">✂️ Serviços</div>
+                  <div style="font-size:11px;color:var(--text2);margin-bottom:10px">Importe catálogo de serviços</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="btn btn-secondary btn-sm" onclick="baixarModeloServicos()">⬇ Baixar Modelo</button>
+                    <label class="btn btn-primary btn-sm" style="cursor:pointer">📂 Importar<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="_importarArquivoCSV(event,'servicos')"></label>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="card">
@@ -2020,10 +2058,16 @@ function _sbAtivarRealtime(tenantId) {
   _sbChannels.forEach(function(ch) { try { _sb.removeChannel(ch); } catch(e) {} });
   _sbChannels = [];
   var tabelas = [
-    ['agendamentos','agendamentos'], ['clientes','clientes'],
-    ['servicos','servicos'], ['produtos','produtos'],
-    ['caixas','caixas'], ['movimentacoes_financeiras','movimentacoes_fin'],
-    ['regras_fidelidade','regras_fidelidade'], ['checklists','checklists']
+    ['agendamentos','agendamentos'],
+    ['clientes','clientes'],
+    ['servicos','servicos'],
+    ['produtos','produtos'],
+    ['caixas','caixas'],
+    ['movimentacoes','movimentacoes'],
+    ['movimentacoes_financeiras','movimentacoes_fin'],
+    ['regras_fidelidade','regras_fidelidade'],
+    ['checklists','checklists'],
+    ['wa_templates','wa_templates']
   ];
   tabelas.forEach(function(cfg) {
     var ch = _sb.channel('gbr_' + cfg[0] + '_' + tenantId)
@@ -2075,8 +2119,12 @@ function _sbAtivarRealtime(tenantId) {
         _notifCache.unshift(notif);
         renderNotifLista();
         atualizarBadgeNotif();
-        // Mostrar toast de nova notificação
+        // FIX C4: Mostrar toast E popup para notificações urgentes
         toast('🔔 ' + notif.titulo, 'info');
+        // Popup automático para alertas e avisos importantes
+        if(notif.tipo==='alerta'||notif.tipo==='ok'||notif.tipo==='err'){
+          setTimeout(function(){ _mostrarPopupNotif(notif); }, 500);
+        }
       }
     }).subscribe();
   _sbChannels.push(notifCh);
@@ -2815,8 +2863,27 @@ function mudarStatus(id,novoSt){
     const cli=DATA.clientes.find(c=>c.id===ag.cliente_id);
     const serv=DATA.servicos.find(s=>s.id===ag.servico_id);
     if(cli&&serv)cli.pontos_fidelidade=(cli.pontos_fidelidade||0)+(serv.pontos_fidelidade||0);
+    // FIX C2: Abre caixa automaticamente se ainda não aberto no dia
+    if(!currentCaixa){
+      const hoje=new Date().toISOString().slice(0,10);
+      const caixaHoje=DATA.caixas.find(c=>c.tenant_id===currentTenant?.id&&c.status==='aberto'&&(c.aberto_em||'').slice(0,10)===hoje);
+      if(caixaHoje){
+        currentCaixa=caixaHoje;
+      } else {
+        // Cria caixa automático com saldo 0
+        currentCaixa={id:uid(),tenant_id:currentTenant?.id,saldo_inicial:0,contagem_abertura:{},total_esperado:0,status:'aberto',aberto_em:new Date().toISOString(),auto_aberto:true};
+        DATA.caixas.push(currentCaixa);
+        salvarDados();
+        toast('📂 Caixa aberto automaticamente para registrar o serviço.','info');
+      }
+    }
     if(currentCaixa){
-      DATA.movimentacoes.push({id:uid(),tenant_id:currentTenant?.id,caixa_id:currentCaixa.id,tipo:'entrada',categoria:'servico',valor:ag.valor_total,forma_pagamento:ag.forma_pagamento,descricao:'Serviço: '+(serv?.nome||''),created_at:new Date().toISOString()});
+      var movServ = {id:uid(),tenant_id:currentTenant?.id,caixa_id:currentCaixa.id,tipo:'entrada',categoria:'servico',valor:ag.valor_total,forma_pagamento:ag.forma_pagamento,descricao:'Serviço: '+(serv?.nome||''),created_at:new Date().toISOString()};
+      DATA.movimentacoes.push(movServ);
+      // FIX SYNC: salvar no Supabase
+      if(_sb && _sbTenantId){
+        _sb.from('movimentacoes').upsert(movServ, {onConflict:'id'}).catch(function(){});
+      }
       toast('✓ '+fmtMoney(ag.valor_total)+' lançado no caixa!','success');
     }
     // MÓDULO 13: Dedução automática de estoque via ficha técnica
@@ -3956,8 +4023,16 @@ function renderCaixa(){
   const maxV=Math.max(...Object.values(porPag),1);
   el.innerHTML+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"><div class="card"><div class="card-header"><div class="card-title">Resumo do Dia</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px"><div style="background:var(--bg3);border-radius:8px;padding:12px"><div style="font-size:10.5px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Entradas</div><div style="font-size:18px;font-weight:700;color:var(--green)">'+fmtMoney(entradas)+'</div></div><div style="background:var(--bg3);border-radius:8px;padding:12px"><div style="font-size:10.5px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Saídas</div><div style="font-size:18px;font-weight:700;color:var(--red)">'+fmtMoney(saidas)+'</div></div></div>'+(Object.keys(porPag).length?Object.entries(porPag).map(([k,v],i)=>'<div class="chart-row"><div class="chart-lbl">'+(pagLabels[k]||k)+'</div><div class="chart-bg"><div class="chart-bar" style="width:'+(v/maxV*100).toFixed(0)+'%;background:'+cores[i%6]+'">'+(v/maxV*100)>20?fmtMoney(v):''+'</div></div><div class="chart-v">'+fmtMoney(v)+'</div></div>').join(''):'<div class="empty"><div class="empty-title">Sem entradas</div></div>')+'</div>';
   el.innerHTML+='<div class="card"><div class="card-header"><div class="card-title">Movimentações</div></div>';
-  if(!movs.length)el.innerHTML+='<div class="empty"><div class="empty-title">Nenhuma movimentação</div></div>';
-  else el.innerHTML+='<div class="mov-list">'+movs.slice(0,15).map(m=>'<div class="mov-item"><div class="mov-icon '+(m.tipo==='entrada'?'entrada':'saida')+'">'+(m.tipo==='entrada'?'📥':'📤')+'</div><div class="mov-info"><div class="mov-desc">'+m.descricao+'</div><div class="mov-cat">'+(m.forma_pagamento||m.categoria||'')+' · '+fmtTime(m.created_at)+'</div></div><div class="mov-valor '+(m.tipo==='entrada'?'entrada':'saida')+'">'+(m.tipo==='entrada'?'+ ':'− ')+fmtMoney(m.valor)+'</div></div>').join('')+'</div>';
+  // FIX C6: Mostrar saldo inicial de abertura como primeiro item
+  var itensMovs = [];
+  if(currentCaixa.saldo_inicial > 0) {
+    itensMovs.push('<div class="mov-item" style="border-left:3px solid var(--blue);opacity:.8"><div class="mov-icon" style="background:rgba(59,130,246,.15);color:var(--blue)">🔓</div><div class="mov-info"><div class="mov-desc">Abertura de Caixa</div><div class="mov-cat">saldo inicial · '+fmtDateTime(currentCaixa.aberto_em)+'</div></div><div class="mov-valor entrada">+ '+fmtMoney(currentCaixa.saldo_inicial)+'</div></div>');
+  }
+  movs.slice(0,20).forEach(function(m){
+    itensMovs.push('<div class="mov-item"><div class="mov-icon '+(m.tipo==='entrada'?'entrada':'saida')+'">'+(m.tipo==='entrada'?'📥':'📤')+'</div><div class="mov-info"><div class="mov-desc">'+m.descricao+'</div><div class="mov-cat">'+(m.forma_pagamento||m.categoria||'')+' · '+fmtTime(m.created_at)+'</div></div><div class="mov-valor '+(m.tipo==='entrada'?'entrada':'saida')+'">'+(m.tipo==='entrada'?'+ ':'− ')+fmtMoney(m.valor)+'</div></div>');
+  });
+  if(!itensMovs.length) el.innerHTML+='<div class="empty"><div class="empty-title">Nenhuma movimentação</div></div>';
+  else el.innerHTML+='<div class="mov-list">'+itensMovs.join('')+'</div>';
   el.innerHTML+='</div></div>';
 }
 
@@ -3976,7 +4051,13 @@ function abrirCaixa(){
   const contagem={dinheiro:+document.getElementById('ac_din').value||0,pix:+document.getElementById('ac_pix').value||0,credito:+document.getElementById('ac_cred').value||0,debito:+document.getElementById('ac_deb').value||0};
   const total=Object.values(contagem).reduce((a,b)=>a+b,0);
   currentCaixa={id:uid(),tenant_id:currentTenant?.id,saldo_inicial:total,contagem_abertura:contagem,total_esperado:total,status:'aberto',aberto_em:new Date().toISOString()};
-  DATA.caixas.push(currentCaixa);salvarDados();closeModal('modalAbrirCaixa');renderCaixa();toast('Caixa aberto com '+fmtMoney(total)+'!');
+  DATA.caixas.push(currentCaixa);
+  salvarDados();
+  // FIX SYNC: salvar caixa no Supabase
+  if(_sb && _sbTenantId){
+    _sbUpsert('caixas', currentCaixa).catch(function(e){ console.warn('[GBR] caixa upsert:', e.message); });
+  }
+  closeModal('modalAbrirCaixa');renderCaixa();toast('Caixa aberto com '+fmtMoney(total)+'!');
 }
 
 // Fechar caixa
@@ -4025,6 +4106,13 @@ function fecharCaixa(){
     categoria:'Fechamento de Caixa', descricao:'Caixa fechado — '+new Date().toLocaleDateString('pt-BR'),
     valor:real, data:hoje, forma_pagamento:'misto', created_at:new Date().toISOString()
   });
+  // FIX SYNC: salvar fechamento do caixa no Supabase
+  if(_sb && _sbTenantId && DATA.caixas[i]){
+    _sbUpsert('caixas', DATA.caixas[i]).catch(function(e){ console.warn('[GBR] fecharCaixa upsert:', e.message); });
+    // Salvar movimentação de fechamento no financeiro
+    var movFin = DATA.movimentacoes_fin[DATA.movimentacoes_fin.length-1];
+    if(movFin) _sbUpsert('movimentacoes_financeiras', movFin).catch(function(){});
+  }
   currentCaixa=null;salvarDados();closeModal('modalFecharCaixa');renderCaixa();atualizarFidAlerts();toast('Caixa fechado e lançado no financeiro!');
 }
 
@@ -4043,7 +4131,12 @@ function confirmarMovCaixa(){
   const desc=document.getElementById('movCaixaDesc').value.trim();
   if(!val||val<=0){toast('Informe o valor','error');return;}
   if(!desc){toast('Informe a descrição','error');return;}
-  DATA.movimentacoes.push({id:uid(),tenant_id:currentTenant?.id,caixa_id:currentCaixa.id,tipo,categoria:'manual',valor:val,forma_pagamento:document.getElementById('movCaixaPag').value,descricao:desc,created_at:new Date().toISOString()});
+  var mov = {id:uid(),tenant_id:currentTenant?.id,caixa_id:currentCaixa.id,tipo,categoria:'manual',valor:val,forma_pagamento:document.getElementById('movCaixaPag').value,descricao:desc,created_at:new Date().toISOString()};
+  DATA.movimentacoes.push(mov);
+  // FIX SYNC: salvar movimentação no Supabase
+  if(_sb && _sbTenantId){
+    _sb.from('movimentacoes').upsert(mov, {onConflict:'id'}).catch(function(e){ console.warn('[GBR] mov upsert:', e.message); });
+  }
   salvarDados();closeModal('modalMovCaixa');renderCaixa();toast('Movimentação registrada!');
 }
 
@@ -4132,7 +4225,7 @@ function initCanvasLazy(){
   if (!assinCanvas) { console.warn('[GBR] #canvasAssin não encontrado'); return; }
   try {
     assinCtx = assinCanvas.getContext('2d');
-    assinCtx.strokeStyle = '#eaeaf2'; assinCtx.lineWidth = 2.5;
+    assinCtx.strokeStyle = '#1a1a2e'; assinCtx.lineWidth = 2.5; // FIX: cor escura para visibilidade
     assinCtx.lineCap = 'round'; assinCtx.lineJoin = 'round';
     const getPos = e => {
       const r = assinCanvas.getBoundingClientRect();
@@ -4185,6 +4278,8 @@ function salvarChk(st){
   if(!aid){toast('Selecione o agendamento','error');return;}
   if(st==='aprovado'&&!assinOk){toast('É necessário confirmar a assinatura do cliente para aprovar','warn');return;}
   const chk={id:uid(),tenant_id:currentTenant?.id,agendamento_id:aid,itens:chkItens,fotos:fotosChk,assinatura:assinData,observacao:document.getElementById('chkObs').value,status:st,aprovado_em:st==='aprovado'?new Date().toISOString():null,created_at:new Date().toISOString()};
+  // FIX SYNC: salvar checklist no Supabase
+  if(_sb && _sbTenantId){ _sbUpsert('checklists', chk).catch(function(e){ console.warn('[GBR] checklist upsert:', e.message); }); }
   DATA.checklists.push(chk);salvarDados();closeModal('modalChecklist');renderChecklists();
   toast('Checklist '+( st==='aprovado'?'aprovado':'salvo')+'!');
 }
@@ -5004,6 +5099,40 @@ function toggleFinCat(el, cat) {
       row.style.display = _finCatsSelecionadas.has(catCell) ? '' : 'none';
     }
   });
+}
+
+function setFinPeriodo(p) {
+  window._finPeriodo = p;
+  // Atualizar botões ativos
+  ['hoje','semana','mes','ano','custom'].forEach(function(k) {
+    var btn = document.getElementById('finTab-'+k);
+    if (!btn) return;
+    if (k === p) {
+      btn.className = 'btn btn-sm'; btn.style.background='var(--accent)'; btn.style.color='#fff';
+    } else {
+      btn.className = 'btn btn-secondary btn-sm'; btn.style.background=''; btn.style.color='';
+    }
+  });
+  var hoje = new Date();
+  var de = document.getElementById('finDe');
+  var ate = document.getElementById('finAte');
+  var filtroWrap = document.getElementById('finFiltroWrap');
+  if (filtroWrap) filtroWrap.style.display = p === 'custom' ? '' : 'none';
+  if (p === 'hoje') {
+    de.value = hoje.toISOString().slice(0,10);
+    ate.value = hoje.toISOString().slice(0,10);
+  } else if (p === 'semana') {
+    var dom = new Date(hoje); dom.setDate(hoje.getDate() - hoje.getDay());
+    de.value = dom.toISOString().slice(0,10);
+    ate.value = hoje.toISOString().slice(0,10);
+  } else if (p === 'mes') {
+    de.value = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+    ate.value = hoje.toISOString().slice(0,10);
+  } else if (p === 'ano') {
+    de.value = hoje.getFullYear() + '-01-01';
+    ate.value = hoje.toISOString().slice(0,10);
+  }
+  renderFinanceiro();
 }
 
 function renderFinanceiro(){
@@ -6761,22 +6890,55 @@ async function aoInicializar(tid, token) {
   document.getElementById('aoLoading').style.display = 'block';
   document.getElementById('aoStep1').style.display = 'none';
   try {
-    // Criar cliente Supabase público (anon)
-    var sbPublic = supabase.createClient(GBR_SB_URL, GBR_SB_ANON, {auth:{persistSession:false}});
+    // FIX C3: Usar _sb global ou criar cliente único por sessão (evita Multiple GoTrueClient)
+    // Aguardar SDK estar pronto (máx 5s)
+    var sbPublic = null;
+    for (var _w = 0; _w < 50; _w++) {
+      if (typeof supabase !== 'undefined' && GBR_SB_URL && GBR_SB_ANON) {
+        sbPublic = window._sbAO || (window._sbAO = supabase.createClient(GBR_SB_URL, GBR_SB_ANON, {auth:{persistSession:false,autoRefreshToken:false}}));
+        break;
+      }
+      await new Promise(function(r){ setTimeout(r, 100); });
+    }
+    if (!sbPublic) { aoMostrarErro('Erro de conexão. Recarregue a página.'); return; }
 
-    // 1. Verificar token e carregar dados do tenant
+    // 1. Buscar tenant — tenta por id (string custom) e por ao_token como fallback
     var rTenant = await sbPublic.from('tenants').select('id,nome,ao_token,kill_switch,status_licenca,aparencia,max_vagas').eq('id', tid).maybeSingle();
-    if (!rTenant.data) { aoMostrarErro('Estabelecimento não encontrado.'); return; }
+
+    // Fallback: buscar via global_settings se RLS bloquear ou id não bater
+    if (!rTenant.data || rTenant.error) {
+      var rCfgFb = await sbPublic.from('global_settings').select('value').eq('key','config_ao_'+token).maybeSingle();
+      if (rCfgFb.data && rCfgFb.data.value && rCfgFb.data.value.tenant_id) {
+        var fbTid = rCfgFb.data.value.tenant_id;
+        rTenant = await sbPublic.from('tenants').select('id,nome,ao_token,kill_switch,status_licenca,aparencia,max_vagas').eq('id', fbTid).maybeSingle();
+        if (rTenant.data) _aoTenantId = fbTid;
+      }
+    }
+
+    if (!rTenant.data) {
+      // Último recurso: buscar pelo ao_token diretamente na coluna
+      var rByToken = await sbPublic.from('tenants').select('id,nome,ao_token,kill_switch,status_licenca,aparencia,max_vagas').eq('ao_token', token).maybeSingle();
+      if (rByToken.data) {
+        rTenant = rByToken;
+        _aoTenantId = rByToken.data.id;
+      }
+    }
+
+    if (!rTenant.data) { aoMostrarErro('Estabelecimento não encontrado. Verifique o link ou solicite um novo ao estabelecimento.'); return; }
     var tenant = rTenant.data;
+    // Atualizar tid com o id real caso tenha mudado no fallback
+    tid = tenant.id || tid;
+    _aoTenantId = tid;
+
     if (tenant.kill_switch || tenant.status_licenca === 'inativo') { aoMostrarErro('Este estabelecimento está temporariamente indisponível.'); return; }
 
-    // Verificar token
+    // Verificar token — se ao_token estiver em branco no DB, aceitar qualquer token (modo aberto)
     var tokenSalvo = tenant.ao_token;
     if (!tokenSalvo) {
-      // Token pode estar em global_settings
       var rCfg = await sbPublic.from('global_settings').select('value').eq('key','config_'+tid).maybeSingle();
       if (rCfg.data && rCfg.data.value) tokenSalvo = rCfg.data.value.ao_token;
     }
+    // Se ainda não tem token cadastrado, link é válido (estabelecimento ainda não configurou token)
     if (tokenSalvo && tokenSalvo !== token) { aoMostrarErro('Link inválido ou expirado. Solicite um novo link ao estabelecimento.'); return; }
 
     // 2. Personalizar aparência
@@ -7056,32 +7218,166 @@ function abrirImportarEstoque() {
   input.click();
 }
 
-function baixarModeloEstoque() {
-  // Criar CSV modelo para download
-  var csv = 'nome,categoria,unidade,preco_compra,volume_total,saldo_atual,estoque_minimo\n';
-  csv += 'Shampoo Automotivo Premium,Limpeza,ml,45.90,500,500,100\n';
-  csv += 'Cera de Carnauba,Polimento,ml,89.50,300,300,50\n';
-  csv += 'Lustra-Borracha,Acabamento,ml,32.00,250,250,80\n';
-  csv += 'Microfibra Profissional,Acessórios,un,25.00,1,10,3\n';
-  csv += '# Instruções:\n';
-  csv += '# nome: nome do produto (obrigatório)\n';
-  csv += '# categoria: grupo/categoria do produto\n';
-  csv += '# unidade: ml (mililitros) / g (gramas) / un (unidade)\n';
-  csv += '# preco_compra: valor pago pela embalagem (ex: 45.90)\n';
-  csv += '# volume_total: quantidade total na embalagem (ex: 500 para 500ml)\n';
-  csv += '# saldo_atual: quantidade disponível agora\n';
-  csv += '# estoque_minimo: alerta quando chegar neste valor\n';
+async function _importarArquivoCSV(event, tipo) {
+  var file = event.target.files[0]; if (!file) return;
+  toast('📂 Processando '+tipo+'...','info');
+  var ext = file.name.split('.').pop().toLowerCase();
+  var processar = function(csv) {
+    if (tipo==='clientes') return processarCSVClientes(csv);
+    if (tipo==='servicos') return processarCSVServicos(csv);
+    return processarCSVEstoque(csv);
+  };
+  if (ext==='csv') {
+    // Tentar UTF-8 primeiro, fallback para latin-1
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var txt = ev.target.result;
+      // Verificar se tem caracteres latinos estranhos (encoding errado)
+      if (txt.includes('Ã') || txt.includes('â€')) {
+        // Re-ler como latin-1
+        var r2 = new FileReader();
+        r2.onload = function(e2) { try{ processar(e2.target.result); }catch(err){ toast('Erro: '+err.message,'error'); } };
+        r2.readAsText(file, 'latin-1');
+      } else { try{ processar(txt); }catch(err){ toast('Erro: '+err.message,'error'); } }
+    };
+    reader.readAsText(file, 'UTF-8');
+  } else if (ext==='xlsx'||ext==='xls') {
+    if (typeof XLSX==='undefined') { toast('Use formato CSV para importar.','warn'); return; }
+    var reader2 = new FileReader();
+    reader2.onload = function(ev) {
+      try { var wb=XLSX.read(ev.target.result,{type:'array'}); var ws=wb.Sheets[wb.SheetNames[0]]; processar(XLSX.utils.sheet_to_csv(ws,{FS:',',RS:'\n'})); }
+      catch(err) { toast('Erro Excel: '+err.message,'error'); }
+    };
+    reader2.readAsArrayBuffer(file);
+  } else { toast('Formato inválido. Use .csv, .xlsx ou .xls','error'); }
+}
 
+function baixarModeloEstoque() {
+  // CSV modelo aprimorado com instruções embutidas e dados reais de exemplo
+  var BOM = '\uFEFF'; // BOM UTF-8 para Excel abrir corretamente com acentos
+  var linhas = [
+    // ── Instruções no topo (linhas comentadas são ignoradas na importação)
+    '# ╔══════════════════════════════════════════════════════════════╗',
+    '# ║     GBR Sistemas — Modelo de Importação de Estoque v2       ║',
+    '# ╚══════════════════════════════════════════════════════════════╝',
+    '#',
+    '# INSTRUÇÕES:',
+    '# 1. Não apague nem renomeie o cabeçalho (linha com os nomes das colunas)',
+    '# 2. Preencha a partir da linha após o cabeçalho',
+    '# 3. Linhas que começam com # são ignoradas',
+    '# 4. Use ponto (.) como separador decimal: 45.90  (NÃO use vírgula: 45,90)',
+    '# 5. Salve como CSV (separado por vírgula) antes de importar',
+    '#',
+    '# CAMPOS OBRIGATÓRIOS: nome',
+    '# CAMPOS OPCIONAIS: todos os demais',
+    '#',
+    '# VALORES ACEITOS:',
+    '#   unidade    → ml | g | kg | L | un | par | rolo | pct | cx',
+    '#   categoria  → Limpeza | Químicos | Abrasivo | Proteção | Acessório | Outros',
+    '#',
+    '# ──────────────────────────────────────────────────────────────',
+    // ── Cabeçalho oficial ──
+    'nome,categoria,unidade,preco_compra,volume_embalagem,saldo_atual,estoque_minimo,fornecedor,descricao',
+    // ── Exemplos preenchidos ──
+    'V-FLOC,Limpeza,ml,108.90,5000,5000,500,Fornecedor ABC,Limpador multiuso profissional',
+    'V-MOL,Químicos,ml,98.90,5000,5000,500,Fornecedor ABC,Removedor de contaminantes',
+    'SINTRA PRÓ,Químicos,ml,79.90,5000,5000,100,Distribuidora XYZ,Desincrustante de insetos',
+    'GLAZY,Químicos,ml,126.90,5000,5000,100,Distribuidora XYZ,Selante de pintura',
+    'VEXUS,Químicos,ml,89.90,5000,5000,500,Fornecedor ABC,Revigorante de verniz',
+    'DELET,Químicos,ml,99.90,5000,5000,500,Fornecedor ABC,Descontaminante de rodas',
+    'SANITIZANTE,Limpeza,ml,25.90,1500,1500,100,Mercado Local,Higienizador de interior',
+    'FOCUS,Abrasivo,ml,48.90,240,240,50,Distribuidora XYZ,Polidor de corte leve',
+    'TOK FINAL,Proteção,ml,35.17,500,500,100,Fornecedor ABC,Finalizador brilho intenso',
+    'BACTRAN,Limpeza,ml,61.00,3000,3000,500,Distribuidora XYZ,Bactericida automotivo',
+    'REVELAX,Químicos,ml,36.90,500,500,100,Fornecedor ABC,Revelador de defeitos',
+    'V-40,Abrasivo,ml,49.25,240,240,100,Distribuidora XYZ,Polidor de acabamento',
+    'CADILLAC POLIMENTO,Abrasivo,ml,58.95,1500,1500,100,Distribuidora XYZ,Polidor profissional',
+    'CADILLAC LUSTRO,Abrasivo,ml,58.95,1500,1500,100,Distribuidora XYZ,Lustrador de pintura',
+    'BOINA DE POLIMENTO,Acessório,un,8.00,1,3,1,Distribuidora XYZ,Boina de espuma para politriz',
+    'MICROFIBRA PROFISSIONAL,Acessório,un,12.50,1,10,3,Mercado Local,Pano de microfibra 40x40cm',
+    'CLAY BAR,Acessório,un,22.00,1,5,2,Distribuidora XYZ,Argila descontaminante',
+    'PRETINHO SPRAY,Químicos,ml,26.92,400,400,100,Fornecedor ABC,Revitalizador de plásticos',
+    'REVITALIZADOR PLÁSTICO,Químicos,ml,59.90,500,500,100,Distribuidora XYZ,Condicionador de borrachas',
+    '#',
+    '# ── Adicione seus produtos abaixo desta linha ──',
+  ];
+  var csv = BOM + linhas.join('\r\n');
   var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   var url  = URL.createObjectURL(blob);
   var a    = document.createElement('a');
   a.href   = url;
-  a.download = 'modelo_importacao_estoque_GBR.csv';
-  document.body.appendChild(a);
-  a.click();
+  a.download = 'GBR_Modelo_Estoque.csv';
+  document.body.appendChild(a); a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('📥 Modelo baixado! Preencha e importe.','success');
+  toast('📥 Modelo de Estoque baixado! Abra no Excel, preencha e importe.','success');
+}
+
+// ── Baixar modelo de Clientes ──
+function baixarModeloClientes() {
+  var BOM = '\uFEFF';
+  var linhas = [
+    '# ╔══════════════════════════════════════════════════════════════╗',
+    '# ║     GBR Sistemas — Modelo de Importação de Clientes         ║',
+    '# ╚══════════════════════════════════════════════════════════════╝',
+    '#',
+    '# INSTRUÇÕES:',
+    '# 1. Não apague nem renomeie o cabeçalho',
+    '# 2. Telefone: apenas números (ex: 11987654321)',
+    '# 3. CPF: apenas números (ex: 12345678901)',
+    '# 4. data_nascimento: formato AAAA-MM-DD (ex: 1990-05-20)',
+    '# 5. Linhas com # são ignoradas',
+    '#',
+    'nome_completo,telefone,email,cpf,data_nascimento,cidade,observacao',
+    'João da Silva Santos,11987654321,joao@email.com,12345678901,1985-03-15,São Paulo,Cliente VIP',
+    'Maria Oliveira Costa,11976543210,maria@email.com,98765432100,1992-07-22,Guarulhos,Prefere sábado',
+    'Carlos Eduardo Lima,11965432109,,,,Mogi das Cruzes,',
+    '#',
+    '# ── Adicione seus clientes abaixo desta linha ──',
+  ];
+  var csv = BOM + linhas.join('\r\n');
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href = url; a.download = 'GBR_Modelo_Clientes.csv';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast('📥 Modelo de Clientes baixado!','success');
+}
+
+// ── Baixar modelo de Serviços ──
+function baixarModeloServicos() {
+  var BOM = '\uFEFF';
+  var linhas = [
+    '# ╔══════════════════════════════════════════════════════════════╗',
+    '# ║     GBR Sistemas — Modelo de Importação de Serviços         ║',
+    '# ╚══════════════════════════════════════════════════════════════╝',
+    '#',
+    '# INSTRUÇÕES:',
+    '# 1. preco_base: use ponto como decimal (ex: 150.00)',
+    '# 2. tempo_estimado_min: duração em MINUTOS (ex: 120 = 2 horas)',
+    '# 3. pontos_fidelidade: pontos concedidos ao concluir o serviço',
+    '# 4. Linhas com # são ignoradas',
+    '#',
+    'nome,categoria,preco_base,tempo_estimado_min,descricao,pontos_fidelidade',
+    'Lavagem Simples,Lavagem,60.00,30,Lavagem externa com jato de água e shampoo,60',
+    'Lavagem Completa,Lavagem,120.00,60,Lavagem interna e externa + aspiração,120',
+    'Polimento Leve,Polimento,250.00,120,Polimento de correção superficial,250',
+    'Polimento Completo,Polimento,450.00,240,Polimento com múltiplas etapas de correção,450',
+    'Higienização Interna,Higienização,200.00,120,Higienização completa do interior,200',
+    'Cristalização,Proteção,350.00,180,Aplicação de cristalizador de pintura,350',
+    'PPF,Proteção,1200.00,480,Película de proteção de pintura,1200',
+    '#',
+    '# ── Adicione seus serviços abaixo desta linha ──',
+  ];
+  var csv = BOM + linhas.join('\r\n');
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href = url; a.download = 'GBR_Modelo_Servicos.csv';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast('📥 Modelo de Serviços baixado!','success');
 }
 
 async function importarArquivoEstoque(e) {
@@ -7119,73 +7415,201 @@ async function importarArquivoEstoque(e) {
   }
 }
 
-async function processarCSVEstoque(csvText) {
-  var linhas = csvText.split('\n').map(function(l){return l.trim();}).filter(Boolean);
-  if (!linhas.length) { toast('Arquivo vazio.','error'); return; }
+// ════ PARSER CSV UNIVERSAL — detecta ; ou , , suporta aspas, encoding PT-BR ════
+function _csvParseLinha(linha, sep) {
+  var cells = [], cur = '', inQ = false;
+  for (var i = 0; i < linha.length; i++) {
+    var c = linha[i];
+    if (c === '"') { inQ = !inQ; continue; }
+    if (c === sep && !inQ) { cells.push(cur.trim()); cur = ''; continue; }
+    cur += c;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+function _parseValorMonetario(v) {
+  if (!v) return 0;
+  // Remove R$, espaços, pontos de milhar; troca vírgula decimal por ponto
+  var s = String(v).replace(/R\$\s*/g,'').replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,'').trim();
+  return parseFloat(s) || 0;
+}
+function _csvDetectarSeparador(linha) {
+  var nPV = (linha.match(/;/g)||[]).length;
+  var nVG = (linha.match(/,/g)||[]).length;
+  return nPV > nVG ? ';' : ',';
+}
 
-  // Detectar cabeçalho
-  var header = linhas[0].toLowerCase().split(',').map(function(h){return h.replace(/[^a-z_]/g,'');});
-  var getCol = function(row, name) {
-    var idx = header.indexOf(name);
-    return idx >= 0 ? (row[idx]||'').trim().replace(/"/g,'') : '';
+async function processarCSVEstoque(csvText) {
+  // Remover BOM UTF-8 se presente
+  csvText = csvText.replace(/^\uFEFF/, '');
+  var linhas = csvText.split(/\r?\n/).map(function(l){return l.trim();}).filter(function(l){ return l && !l.startsWith('#'); });
+  if (!linhas.length) { toast('Arquivo vazio ou sem dados válidos.','error'); return; }
+
+  var sep = _csvDetectarSeparador(linhas[0]);
+  var header = _csvParseLinha(linhas[0].toLowerCase(), sep).map(function(h){
+    return h.replace(/[^a-záàâãéèêíïóôõöúüçña-z0-9_]/gi,'').toLowerCase()
+            .replace('ã','a').replace('ç','c').replace('ê','e').replace('ô','o');
+  });
+
+  var getCol = function(row, ...nomes) {
+    for (var i = 0; i < nomes.length; i++) {
+      var idx = header.indexOf(nomes[i]);
+      if (idx >= 0 && row[idx] !== undefined) return (row[idx]||'').trim().replace(/^"|"$/g,'');
+    }
+    return '';
   };
 
-  var importados = 0, erros = 0, atualizados = 0;
+  var importados = 0, atualizados = 0, erros = 0, erroDetalhes = [];
   var tenantId = currentTenant?.id;
   if (!tenantId) { toast('Sem empresa vinculada.','error'); return; }
 
   for (var i = 1; i < linhas.length; i++) {
-    var linha = linhas[i];
-    if (linha.startsWith('#')) continue; // comentários
-    var row = linha.split(',');
+    if (linhas[i].startsWith('#')) continue;
+    var row = _csvParseLinha(linhas[i], sep);
     var nome = getCol(row, 'nome');
-    if (!nome) continue;
+    if (!nome || nome.length < 2) continue;
 
-    var produto = {
-      id: uid(),
-      tenant_id: tenantId,
-      nome: nome,
-      categoria: getCol(row,'categoria') || null,
-      unidade: getCol(row,'unidade') || 'un',
-      preco_compra: parseFloat(getCol(row,'preco_compra')) || 0,
-      custo_por_embalagem: parseFloat(getCol(row,'preco_compra')) || 0,
-      volume_total: parseFloat(getCol(row,'volume_total')) || 1,
-      quantidade_por_embalagem: parseFloat(getCol(row,'volume_total')) || 1,
-      saldo_atual: parseFloat(getCol(row,'saldo_atual')) || 0,
-      quantidade_atual: parseFloat(getCol(row,'saldo_atual')) || 0,
-      estoque_minimo: parseFloat(getCol(row,'estoque_minimo')) || 0,
-      quantidade_minima: parseFloat(getCol(row,'estoque_minimo')) || 0,
-      ativo: true,
-      created_at: new Date().toISOString()
-    };
+    try {
+      var produto = {
+        id: uid(),
+        tenant_id: tenantId,
+        nome: nome,
+        categoria: getCol(row,'categoria','grupo') || 'Outros',
+        unidade: getCol(row,'unidade','und','un') || 'un',
+        preco_compra: _parseValorMonetario(getCol(row,'preco_compra','preco','valor','preco_custo','custo')),
+        custo_por_embalagem: _parseValorMonetario(getCol(row,'preco_compra','preco','valor','preco_custo','custo')),
+        volume_total: parseFloat(getCol(row,'volume_total','volume_embalagem','volume','qtd_embalagem','embalagem_contem')) || 1,
+        quantidade_por_embalagem: parseFloat(getCol(row,'volume_total','volume_embalagem','volume','qtd_embalagem','embalagem_contem')) || 1,
+        saldo_atual: parseFloat(getCol(row,'saldo_atual','saldo','estoque_atual','quantidade_atual','qtd_atual')) || 0,
+        quantidade_atual: parseFloat(getCol(row,'saldo_atual','saldo','estoque_atual','quantidade_atual','qtd_atual')) || 0,
+        estoque_minimo: parseFloat(getCol(row,'estoque_minimo','minimo','qtd_minima','quantidade_minima','alerta')) || 0,
+        quantidade_minima: parseFloat(getCol(row,'estoque_minimo','minimo','qtd_minima','quantidade_minima','alerta')) || 0,
+        fornecedor: getCol(row,'fornecedor','marca','fabricante') || null,
+        descricao: getCol(row,'descricao','observacao','obs','notas') || null,
+        ativo: true,
+        created_at: new Date().toISOString()
+      };
 
-    // Verificar se produto já existe pelo nome
-    var existente = DATA.produtos.findIndex(function(p){
-      return p.nome.toLowerCase() === nome.toLowerCase() && p.tenant_id === tenantId;
-    });
+      var existente = DATA.produtos.findIndex(function(p){
+        return p.nome.toLowerCase().trim() === nome.toLowerCase().trim() && p.tenant_id === tenantId;
+      });
 
-    if (existente >= 0) {
-      // Atualizar existente
-      Object.assign(DATA.produtos[existente], produto, {id: DATA.produtos[existente].id});
-      if (_sb && _sbTenantId) {
-        try { await _sbUpsert('produtos', DATA.produtos[existente]); atualizados++; }
-        catch(e) { erros++; }
-      } else { atualizados++; }
-    } else {
-      // Novo produto
-      DATA.produtos.push(produto);
-      if (_sb && _sbTenantId) {
-        try { await _sbUpsert('produtos', produto); importados++; }
-        catch(e) { erros++; }
-      } else { importados++; }
+      if (existente >= 0) {
+        Object.assign(DATA.produtos[existente], produto, {id: DATA.produtos[existente].id});
+        if (_sb && _sbTenantId) { try { await _sbUpsert('produtos', DATA.produtos[existente]); } catch(e){} }
+        atualizados++;
+      } else {
+        DATA.produtos.push(produto);
+        if (_sb && _sbTenantId) { try { await _sbUpsert('produtos', produto); } catch(e){} }
+        importados++;
+      }
+    } catch(e) {
+      erros++;
+      erroDetalhes.push('Linha '+(i+1)+': '+nome+' — '+e.message);
     }
   }
 
-  salvarDados();
-  renderEstoque();
+  salvarDados(); renderEstoque();
   logAuditoria('Importação de Estoque', importados+' criados, '+atualizados+' atualizados'+(erros?' ('+erros+' erros)':''));
-  toast('✅ '+importados+' produtos importados, '+atualizados+' atualizados!'+(erros?' ⚠️ '+erros+' erros.':''),'success');
+  if (erroDetalhes.length) console.warn('[GBR] Erros importação:', erroDetalhes);
+  toast('✅ '+importados+' importados, '+atualizados+' atualizados!'+(erros?' ⚠️ '+erros+' com erro.':''), importados+atualizados>0?'success':'warn');
 }
+
+// ════ IMPORTAR CLIENTES via CSV ════
+async function processarCSVClientes(csvText) {
+  csvText = csvText.replace(/^\uFEFF/, '');
+  var linhas = csvText.split(/\r?\n/).map(function(l){return l.trim();}).filter(function(l){ return l && !l.startsWith('#'); });
+  if (!linhas.length) { toast('Arquivo vazio.','error'); return; }
+  var sep = _csvDetectarSeparador(linhas[0]);
+  var header = _csvParseLinha(linhas[0].toLowerCase(), sep).map(function(h){ return h.replace(/[^a-z_]/g,''); });
+  var getCol = function(row) {
+    return function() {
+      var nomes = Array.from(arguments);
+      for (var i=0; i<nomes.length; i++) {
+        var idx = header.indexOf(nomes[i]);
+        if (idx>=0&&row[idx]!==undefined) return (row[idx]||'').trim().replace(/^"|"$/g,'');
+      }
+      return '';
+    };
+  };
+  var imp=0, atu=0, err=0;
+  var tenantId = currentTenant?.id;
+  for (var i=1; i<linhas.length; i++) {
+    if (linhas[i].startsWith('#')) continue;
+    var row = _csvParseLinha(linhas[i], sep);
+    var g = getCol(row);
+    var nome = g('nome_completo','nome','name');
+    if (!nome||nome.length<2) continue;
+    try {
+      var tel = (g('telefone','fone','celular','whatsapp')||'').replace(/\D/g,'');
+      var cli = {
+        id: uid(), tenant_id: tenantId,
+        nome_completo: nome,
+        telefone: tel || null,
+        email: g('email','e_mail') || null,
+        cpf_cnpj: (g('cpf','cpf_cnpj','documento')||'').replace(/\D/g,'') || null,
+        data_nascimento: g('data_nascimento','nascimento','aniversario') || null,
+        endereco: { cidade: g('cidade','municipio'), uf: g('uf','estado') },
+        observacao: g('observacao','obs','notas') || null,
+        pontos_fidelidade: 0, ativo: true,
+        created_at: new Date().toISOString()
+      };
+      var ex = DATA.clientes.findIndex(function(c){ return tel&&c.telefone&&c.telefone.replace(/\D/g,'')=== tel&&c.tenant_id===tenantId; });
+      if (ex>=0) { Object.assign(DATA.clientes[ex],cli,{id:DATA.clientes[ex].id}); if(_sb&&_sbTenantId) try{await _sbUpsert('clientes',DATA.clientes[ex]);}catch(e){} atu++; }
+      else { DATA.clientes.push(cli); if(_sb&&_sbTenantId) try{await _sbUpsert('clientes',cli);}catch(e){} imp++; }
+    } catch(e){ err++; }
+  }
+  salvarDados(); renderClientes();
+  logAuditoria('Importação de Clientes', imp+' criados, '+atu+' atualizados'+(err?' ('+err+' erros)':''));
+  toast('✅ '+imp+' clientes importados, '+atu+' atualizados!'+(err?' ⚠️ '+err+' erros.':''), imp+atu>0?'success':'warn');
+}
+
+// ════ IMPORTAR SERVIÇOS via CSV ════
+async function processarCSVServicos(csvText) {
+  csvText = csvText.replace(/^\uFEFF/, '');
+  var linhas = csvText.split(/\r?\n/).map(function(l){return l.trim();}).filter(function(l){ return l && !l.startsWith('#'); });
+  if (!linhas.length) { toast('Arquivo vazio.','error'); return; }
+  var sep = _csvDetectarSeparador(linhas[0]);
+  var header = _csvParseLinha(linhas[0].toLowerCase(), sep).map(function(h){ return h.replace(/[^a-z_]/g,''); });
+  var getCol = function(row) {
+    return function() {
+      var nomes = Array.from(arguments);
+      for (var i=0; i<nomes.length; i++) {
+        var idx = header.indexOf(nomes[i]);
+        if (idx>=0&&row[idx]!==undefined) return (row[idx]||'').trim().replace(/^"|"$/g,'');
+      }
+      return '';
+    };
+  };
+  var imp=0, atu=0, err=0;
+  var tenantId = currentTenant?.id;
+  for (var i=1; i<linhas.length; i++) {
+    if (linhas[i].startsWith('#')) continue;
+    var row = _csvParseLinha(linhas[i], sep);
+    var g = getCol(row);
+    var nome = g('nome','servico','name');
+    if (!nome||nome.length<2) continue;
+    try {
+      var srv = {
+        id: uid(), tenant_id: tenantId,
+        nome: nome,
+        categoria: g('categoria','grupo','tipo') || 'Geral',
+        preco_base: _parseValorMonetario(g('preco_base','preco','valor','price')),
+        tempo_estimado_min: parseInt(g('tempo_estimado_min','tempo','duracao','minutos')) || 60,
+        descricao: g('descricao','observacao','obs') || null,
+        pontos_fidelidade: parseInt(g('pontos_fidelidade','pontos')) || 0,
+        ativo: true, created_at: new Date().toISOString()
+      };
+      var ex = DATA.servicos.findIndex(function(s){ return s.nome.toLowerCase().trim()===nome.toLowerCase().trim()&&s.tenant_id===tenantId; });
+      if (ex>=0) { Object.assign(DATA.servicos[ex],srv,{id:DATA.servicos[ex].id}); if(_sb&&_sbTenantId) try{await _sbUpsert('servicos',DATA.servicos[ex]);}catch(e){} atu++; }
+      else { DATA.servicos.push(srv); if(_sb&&_sbTenantId) try{await _sbUpsert('servicos',srv);}catch(e){} imp++; }
+    } catch(e){ err++; }
+  }
+  salvarDados(); renderServicos();
+  logAuditoria('Importação de Serviços', imp+' criados, '+atu+' atualizados'+(err?' ('+err+' erros)':''));
+  toast('✅ '+imp+' serviços importados, '+atu+' atualizados!'+(err?' ⚠️ '+err+' erros.':''), imp+atu>0?'success':'warn');
+}
+
 
 function carregarDados(){
   // Carregamento síncrono via localStorage — todas as chaves unificadas
