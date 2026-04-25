@@ -1190,6 +1190,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
               <button class="btn btn-success" onclick="exportarXLSX('estoque')">📊 Estoque → Excel</button>
               <button class="btn btn-success" onclick="exportarXLSX('financeiro')">📊 Financeiro → Excel</button>
               <label class="btn btn-secondary" style="cursor:pointer">📤 Importar Dados (JSON)<input type="file" accept=".json" style="display:none" onchange="importarDados(this)"></label>
+              <button class="btn btn-secondary btn-sm" onclick="diagnosticarConexao()" style="border:1px solid var(--blue);color:var(--blue)">🔍 Diagnóstico de Conexão</button>
               <button class="btn btn-warning" onclick="recuperarDadosNuvem()" style="background:rgba(251,191,36,.15);border:1px solid var(--accent);color:var(--accent)">☁️ Recuperar Dados da Nuvem</button>
             </div>
             <!-- Importação por tipo -->
@@ -2150,10 +2151,25 @@ function _sbHandleChange(chave, payload) {
 }
 
 async function _sbUpsert(tabela, dados) {
-  if (!_sbReady) return null;
-  var r = await _sb.from(tabela).upsert(dados, {onConflict:'id'}).select().single();
-  if (r.error) { console.warn('[GBR SB] upsert '+tabela+':', r.error.message); return null; }
-  return r.data;
+  if (!_sbReady) {
+    console.warn('[GBR] _sbUpsert: Supabase não inicializado, dado NÃO salvo na nuvem:', tabela);
+    return null;
+  }
+  try {
+    var r = await _sb.from(tabela).upsert(dados, {onConflict:'id'}).select().single();
+    if (r.error) {
+      console.error('[GBR SB] ERRO upsert '+tabela+':', r.error.message, '| Dado:', JSON.stringify(dados).slice(0,100));
+      // Mostrar aviso visual se for erro crítico (não violação de chave duplicada)
+      if (!r.error.message.includes('duplicate') && !r.error.message.includes('unique')) {
+        toast('Erro ao salvar '+tabela+' na nuvem: '+r.error.message, 'error');
+      }
+      return null;
+    }
+    return r.data;
+  } catch(e) {
+    console.error('[GBR SB] EXCEÇÃO upsert '+tabela+':', e.message);
+    return null;
+  }
 }
 async function _sbSoftDelete(tabela, id) {
   if (!_sbReady) return;
@@ -2646,7 +2662,18 @@ function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 
 // ===== UTILS =====
-function uid(){return Date.now().toString(36)+'_'+Math.random().toString(36).substr(2,6);}
+function uid() {
+  // Gera UUID v4 real — compatível com todas as tabelas Supabase
+  // Formato: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID(); // Nativo nos browsers modernos
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    var v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 function toast(msg,type){
   const box=document.getElementById('toastBox');
   const icons={success:'✓',error:'✕',warn:'⚠'};
@@ -3487,18 +3514,21 @@ async function salvarCliente(){
     // Remover campos sem coluna direta no banco
     const saved = await _sbUpsert('clientes', sbDados);
     if (saved) {
-      // Realtime vai atualizar DATA.clientes automaticamente nos outros devices
-      // Atualizar localmente para feedback imediato
+      // Supabase salvou — atualizar DATA local para feedback imediato
+      // O Realtime vai disparar para os outros dispositivos automaticamente
       const idx = DATA.clientes.findIndex(c=>c.id===dados.id);
       if(idx>=0) Object.assign(DATA.clientes[idx], saved); else DATA.clientes.push(saved);
+      // Também salvar no localStorage como cache offline
+      try { localStorage.setItem('gbr_clientes', JSON.stringify(DATA.clientes)); } catch(e) {}
     } else {
-      // Fallback local se Supabase falhar
-      const idx=DATA.clientes.findIndex(c=>c.id===dados.id);
-      if(idx>=0) Object.assign(DATA.clientes[idx],dados); else DATA.clientes.push(dados);
-      salvarDados();
+      // Supabase retornou erro — NÃO salvar silenciosamente no localStorage
+      // O erro já foi exibido pelo _sbUpsert
+      toast('Não foi possível salvar na nuvem. Verifique a conexão.', 'error');
+      return; // Não fechar o modal para o usuário tentar novamente
     }
   } else {
-    // Sem Supabase — modo offline (localStorage)
+    // Sem Supabase (offline) — avisar usuário
+    toast('⚠️ Sem conexão com a nuvem. Dado salvo localmente apenas.', 'warn');
     const idx=DATA.clientes.findIndex(c=>c.id===dados.id);
     if(idx>=0) Object.assign(DATA.clientes[idx],dados); else DATA.clientes.push(dados);
     salvarDados();
@@ -4417,6 +4447,71 @@ function carregarPaginaConfig(){
 
 // ══ RECUPERAÇÃO DE DADOS DA NUVEM ══
 // Força recarga de TODOS os dados do Supabase — útil quando dados "sumiam"
+// ══ DIAGNÓSTICO DE CONEXÃO SUPABASE ══
+async function diagnosticarConexao() {
+  var html = '<div style="font-family:monospace;font-size:12px;line-height:2">';
+  html += '<b>🔍 Diagnóstico de Conexão com o Servidor</b><br><br>';
+
+  // 1. Supabase SDK carregado?
+  html += (_sbReady ? '✅' : '❌') + ' SDK Supabase: ' + (_sbReady ? 'Inicializado' : 'NÃO INICIALIZADO') + '<br>';
+
+  // 2. URL e Key configuradas?
+  html += (window.GBR_SB_URL ? '✅' : '❌') + ' URL do banco: ' + (window.GBR_SB_URL ? GBR_SB_URL.slice(0,40)+'...' : 'NÃO CONFIGURADA') + '<br>';
+
+  // 3. Usuário logado?
+  html += (_sbUserId ? '✅' : '❌') + ' Usuário autenticado: ' + (_sbUserId || 'NÃO LOGADO') + '<br>';
+  html += (_sbTenantId ? '✅' : '❌') + ' Empresa vinculada: ' + (_sbTenantId || 'NÃO VINCULADA') + '<br>';
+
+  // 4. Testar leitura
+  if (_sbReady && _sbTenantId) {
+    try {
+      var t1 = Date.now();
+      var r = await _sb.from('clientes').select('id').eq('tenant_id', _sbTenantId).limit(1);
+      var ms = Date.now() - t1;
+      if (r.error) {
+        html += '❌ Leitura de clientes: ERRO — ' + r.error.message + '<br>';
+        html += '&nbsp;&nbsp;💡 Provável causa: Política RLS bloqueando leitura<br>';
+      } else {
+        html += '✅ Leitura de clientes: OK (' + ms + 'ms) — ' + (r.data||[]).length + ' encontrados<br>';
+      }
+    } catch(e) { html += '❌ Leitura: EXCEÇÃO — ' + e.message + '<br>'; }
+
+    // 5. Testar escrita
+    try {
+      var testId = uid();
+      var rW = await _sb.from('clientes').upsert({
+        id: testId, tenant_id: _sbTenantId,
+        nome_completo: '__TESTE_CONEXAO__', ativo: false,
+        created_at: new Date().toISOString()
+      }, {onConflict:'id'}).select().single();
+      if (rW.error) {
+        html += '❌ Escrita de clientes: ERRO — ' + rW.error.message + '<br>';
+        html += '&nbsp;&nbsp;💡 Provável causa: Política RLS bloqueando escrita, ou coluna "id" não é UUID<br>';
+        if (rW.error.message.includes('uuid') || rW.error.message.includes('invalid input')) {
+          html += '&nbsp;&nbsp;🚨 ERRO DE UUID: A tabela exige UUID mas está recebendo outro formato<br>';
+        }
+      } else {
+        html += '✅ Escrita de clientes: OK<br>';
+        // Limpar registro de teste
+        await _sb.from('clientes').delete().eq('id', testId);
+        html += '✅ Deleção de teste: OK<br>';
+      }
+    } catch(e) { html += '❌ Escrita: EXCEÇÃO — ' + e.message + '<br>'; }
+
+    // 6. Testar realtime
+    html += (_sbChannels && _sbChannels.length > 0 ? '✅' : '❌') + ' Canais Realtime: ' + ((_sbChannels||[]).length) + ' ativos<br>';
+  }
+
+  html += '<br><b>UUID gerado pelo sistema:</b> ' + uid() + '<br>';
+  html += '</div>';
+
+  // Mostrar diagnóstico
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center';
+  d.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:540px;width:90%;max-height:90vh;overflow-y:auto">' + html + '<br><button onclick="this.parentElement.parentElement.remove()" class="btn btn-primary" style="width:100%">Fechar</button></div>';
+  document.body.appendChild(d);
+}
+
 async function recuperarDadosNuvem() {
   if (!_sbReady || !_sbTenantId) {
     toast('Sem conexão com a nuvem. Faça login novamente.', 'error'); return;
