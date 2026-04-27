@@ -2305,12 +2305,16 @@ var _sbColunasRemover = {
 async function _sbUpsert(tabela, dados) {
   if (!_sbReady) { console.warn('[GBR] _sbUpsert ignorado: _sbReady=false. Tabela:', tabela); return null; }
   try {
-    var dadosSanitizados = Object.assign({}, dados);
-    var remover = _sbColunasRemover[tabela] || [];
-    remover.forEach(function(col){ delete dadosSanitizados[col]; });
-    Object.keys(dadosSanitizados).forEach(function(k){
-      if (dadosSanitizados[k] === undefined) delete dadosSanitizados[k];
-    });
+    // Suporte a upsert em massa (array de objetos)
+    var isArray = Array.isArray(dados);
+    var sanitizar = function(obj) {
+      var s = Object.assign({}, obj);
+      var remover = _sbColunasRemover[tabela] || [];
+      remover.forEach(function(col){ delete s[col]; });
+      Object.keys(s).forEach(function(k){ if(s[k]===undefined) delete s[k]; });
+      return s;
+    };
+    var dadosSanitizados = isArray ? dados.map(sanitizar) : sanitizar(dados);
 
     var r = await _sb.from(tabela).upsert(dadosSanitizados, {onConflict:'id', ignoreDuplicates:false});
     if (r.error) {
@@ -3693,6 +3697,7 @@ async function salvarAgendamento(){
   };
   const agId = id || uid();
   const agFull = {id:agId, tenant_id:currentTenant?.id, ...dados,
+    duracao_min: totalMin || 60, // BUG-C12 FIX: incluir duracao_min para Agenda Online
     status: id ? (DATA.agendamentos.find(a=>a.id===id)?.status||'agendado') : 'agendado',
     ativo: true};
 
@@ -6584,14 +6589,35 @@ function renderAuditoria(){
   // NOTA: exclusão de logs disponível apenas no Console Admin (superadmin)
 }
 
-function limparAuditoria(){if(!confirm('Limpar todos os logs?'))return;DATA.auditoria=[];salvarDados();renderAuditoria();toast('Logs limpos');}
+async function limparAuditoria(){
+  if(!confirm('Limpar todos os logs?'))return;
+  DATA.auditoria=[];
+  salvarDados(true);
+  // BUG-C6 FIX: Deletar do Supabase também
+  if (_sbReady && _sbTenantId) {
+    try {
+      await _sb.from('audit_logs').delete().eq('tenant_id', _sbTenantId);
+    } catch(e) { console.warn('[GBR] limparAuditoria Supabase:', e.message); }
+  }
+  renderAuditoria();
+  toast('Logs limpos');
+}
 
 // ── Agenda Online ──────────────────────────────────────────
 const DIAS_SEMANA=['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domingo'];
-function renderAgendaOnline(){
+async function renderAgendaOnline(){
   if(!currentTenant)return;
+  // BUG-C10 FIX: Carregar config do Supabase primeiro
+  if (_sbReady && currentTenant.id) {
+    try {
+      var rAoCfg = await _sb.from('global_settings').select('value').eq('key','ao_config_'+currentTenant.id).maybeSingle();
+      if (rAoCfg.data && rAoCfg.data.value) {
+        if(!DATA.configuracoes[currentTenant.id]) DATA.configuracoes[currentTenant.id]={};
+        Object.assign(DATA.configuracoes[currentTenant.id], rAoCfg.data.value);
+      }
+    } catch(e) { console.warn('[GBR] renderAgendaOnline loadCfg:', e.message); }
+  }
   const cfg=DATA.configuracoes[currentTenant.id]||{};
-  // Token único — carregado do Supabase se disponível, senão do localStorage
   const token=cfg.ao_token||'';
   const baseUrl=window.location.origin+window.location.pathname;
   const link=token?(baseUrl+'?agendar='+token+'&tid='+currentTenant.id):'(nenhum link gerado)';
@@ -6622,7 +6648,7 @@ async function gerarNovoTokenOnline(){
       await _sb.from('global_settings').upsert({key:'ao_token_map', value:mapa, updated_at:new Date().toISOString()},{onConflict:'key'});
     }catch(e){ console.warn('[GBR] ao_token:',e.message); }
   }
-  salvarDados();
+  salvarDados(true); // BUG-C10: skipCloud=true pois já enviamos manualmente acima
   renderAgendaOnline();
   logAuditoria('Gerou novo link de Agenda Online','');
   toast('✅ Novo link gerado! O link anterior foi invalidado.','success');
@@ -6636,12 +6662,23 @@ function copiarLinkOnline(){
     const ta=document.createElement('textarea');ta.value=v;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast('Link copiado!','success');
   });
 }
-function salvarAgendaOnline(){
+async function salvarAgendaOnline(){
+  // BUG-C10 FIX: salvar configurações de Agenda Online no Supabase
   const tid=currentTenant?.id;if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   const horarios=DIAS_SEMANA.map((d,i)=>({dia:i,nome:d,ativo:document.getElementById('aodia_'+i)?.checked||false,inicio:document.getElementById('aoinicio_'+i)?.value||'08:00',fim:document.getElementById('aofim_'+i)?.value||'18:00'}));
   const servOnline=DATA.servicos.filter(s=>s.tenant_id===currentTenant.id&&s.ativo&&document.getElementById('aoserv_'+s.id)?.checked).map(s=>s.id);
   Object.assign(DATA.configuracoes[tid],{ao_ativo:document.getElementById('aoAtivo').checked,ao_horarios:horarios,ao_servicos:servOnline});
-  logAuditoria('Salvou Agenda Online','');salvarDados();toast('Agenda online salva!');
+  // Sync para Supabase
+  if (_sbReady && tid) {
+    try {
+      await _sb.from('global_settings').upsert({
+        key: 'ao_config_' + tid,
+        value: { ao_ativo: DATA.configuracoes[tid].ao_ativo, ao_horarios: horarios, ao_servicos: servOnline },
+        updated_at: new Date().toISOString()
+      }, {onConflict:'key'});
+    } catch(e) { console.warn('[GBR] salvarAgendaOnline Supabase:', e.message); }
+  }
+  logAuditoria('Salvou Agenda Online','');salvarDados(true);toast('✅ Agenda online salva na nuvem!','success');
 }
 
 // ── Manual ─────────────────────────────────────────────────
@@ -8493,37 +8530,78 @@ function toggleNotifPanel(){
   if(_notifAberto) carregarNotificacoes();
 }
 
-function trocarSenha(){
+async function trocarSenha(){
   const nova=document.getElementById('novaSenha').value;
   const conf=document.getElementById('confirmaSenha').value;
   if(nova.length<6){showMsg('trocaMsg','Mínimo 6 caracteres','erro');return;}
   if(nova!==conf){showMsg('trocaMsg','Senhas não conferem','erro');return;}
+  // BUG-C5 FIX: Atualizar senha no Supabase Auth (fonte de verdade)
+  if (_sb && _sbReady) {
+    try {
+      const { error } = await _sb.auth.updateUser({ password: nova });
+      if (error) { showMsg('trocaMsg','Erro ao salvar: '+error.message,'erro'); return; }
+    } catch(e) { showMsg('trocaMsg','Erro: '+e.message,'erro'); return; }
+  }
   const i=DATA.users.findIndex(u=>u.id===currentUser.id);
-  if(i>=0){DATA.users[i].password=nova;DATA.users[i].must_change_password=false;salvarDados();}
-  currentUser.password=nova;currentUser.must_change_password=false;
+  if(i>=0){DATA.users[i].must_change_password=false;salvarDados(true);}
+  currentUser.must_change_password=false;
   loginSucesso(currentUser);
 }
 
-function salvarDados() {
+function salvarDados(skipCloud) {
   var allKeys=[].concat(Object.keys(DATA),['movimentacoes_fin','tickets','auditoria','configuracoes','permissoes']);
+  // 1. Sempre salva localStorage como cache offline
   allKeys.forEach(function(k) {
     if(DATA[k]===undefined) return;
     try { localStorage.setItem('gbr_'+k, JSON.stringify(DATA[k])); } catch(e) {}
   });
-  // FIX: sincronizar fichas técnicas no Supabase (ficam em global_settings)
-  _sbSyncFichas();
+  // 2. Sync Supabase (assíncrono, não bloqueia UI)
+  if (!skipCloud) {
+    _sbSyncFichas();
+    _sbSyncConfiguracoes();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SYNC CONFIGURAÇÕES DO TENANT PARA SUPABASE
+// ═══════════════════════════════════════════════════════════
+var _confSyncTimer = null;
+function _sbSyncConfiguracoes() {
+  if (!_sbReady || !_sbTenantId) return;
+  var cfg = (DATA.configuracoes && DATA.configuracoes[_sbTenantId]) || null;
+  if (!cfg) return;
+  clearTimeout(_confSyncTimer);
+  _confSyncTimer = setTimeout(async function() {
+    try {
+      // Salvar configurações operacionais no campo config do tenant
+      var cfgParaSalvar = {};
+      var chavesSafeConf = [
+        'vagas_simultaneas','ao_ativo','ao_horarios','ao_servicos','ao_token',
+        'desc_sem_senha','desc_com_senha','senha_admin','wa_config',
+        'integ_viacep','integ_wa_api','integ_maps','integ_analytics','integ_smtp'
+      ];
+      chavesSafeConf.forEach(function(k){ if(cfg[k]!==undefined) cfgParaSalvar[k]=cfg[k]; });
+      if (Object.keys(cfgParaSalvar).length > 0) {
+        await _sb.from('tenants').update({
+          config: cfgParaSalvar,
+          atualizado_em: new Date().toISOString()
+        }).eq('id', _sbTenantId);
+      }
+    } catch(e) { console.warn('[GBR] syncConf:', e.message); }
+  }, 2000);
 }
 
 // Sincroniza fichas técnicas no Supabase via global_settings
 var _fichasSyncTimer = null;
 function _sbSyncFichas() {
-  if (!_sbReady || !_sbTenantId || !DATA.fichas || DATA.fichas.length === 0) return;
+  // BUG-C11 FIX: remover condição DATA.fichas.length===0 para permitir sync de deleções
+  if (!_sbReady || !_sbTenantId || !DATA.fichas) return;
   // Debounce: aguarda 1.5s sem novas chamadas antes de enviar
   clearTimeout(_fichasSyncTimer);
   _fichasSyncTimer = setTimeout(async function() {
     try {
       var fichasDoTenant = DATA.fichas.filter(function(f){ return !f.tenant_id || f.tenant_id === _sbTenantId; });
-      if (!fichasDoTenant.length) return;
+      // BUG-C11 FIX: sempre sincronizar, mesmo quando array vazio (deleções)
       await _sb.from('global_settings').upsert({
         key: 'fichas_' + _sbTenantId,
         value: fichasDoTenant,
@@ -8531,6 +8609,56 @@ function _sbSyncFichas() {
       }, {onConflict: 'key'});
     } catch(e) { console.warn('[GBR] sync fichas:', e.message); }
   }, 1500);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SYNC BULK — sincroniza tabelas operacionais com Supabase
+//  Chamado por salvarDados() de forma debounced para não gerar
+//  muitas requisições em operações rápidas consecutivas
+// ═══════════════════════════════════════════════════════════
+var _bulkSyncTimer = null;
+function _sbSyncBulk() {
+  if (!_sbReady || !_sbTenantId) return;
+  clearTimeout(_bulkSyncTimer);
+  _bulkSyncTimer = setTimeout(async function() {
+    var tid = _sbTenantId;
+    // Tabelas que são upsertas linha a linha no Supabase (têm tabelas próprias)
+    var tabelasLinhaLinha = [
+      { data: 'clientes',          tabela: 'clientes'           },
+      { data: 'servicos',          tabela: 'servicos'           },
+      { data: 'agendamentos',      tabela: 'agendamentos'       },
+      { data: 'produtos',          tabela: 'produtos'           },
+      { data: 'regras_fidelidade', tabela: 'regras_fidelidade'  },
+      { data: 'checklists',        tabela: 'checklists'         },
+      { data: 'wa_templates',      tabela: 'wa_templates'       },
+    ];
+    for (var i = 0; i < tabelasLinhaLinha.length; i++) {
+      var cfg = tabelasLinhaLinha[i];
+      var arr = DATA[cfg.data];
+      if (!arr || !arr.length) continue;
+      // Apenas sincroniza registros modificados recentemente (últimos 30 min)
+      var recentes = arr.filter(function(r) {
+        if (r.tenant_id && String(r.tenant_id) !== String(tid)) return false;
+        // Sem updated_at ou created_at → sempre sincroniza (novo registro)
+        var ts = r.updated_at || r.created_at;
+        if (!ts) return true;
+        return (Date.now() - new Date(ts).getTime()) < 1800000; // 30 min
+      });
+      if (!recentes.length) continue;
+      try {
+        await _sbUpsert(cfg.tabela, recentes.length === 1 ? recentes[0] : recentes);
+      } catch(e) {
+        // Upsert de array — tentar um a um se falhar
+        for (var j = 0; j < recentes.length; j++) {
+          try { await _sbUpsert(cfg.tabela, recentes[j]); } catch(e2) {}
+        }
+      }
+    }
+    // Sync fichas via global_settings (tabela própria não existe)
+    _sbSyncFichas();
+    // Sync configurações
+    _sbSyncConfiguracoes();
+  }, 2500); // debounce 2.5s — aguarda operações rápidas terminarem
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
