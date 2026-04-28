@@ -3309,7 +3309,8 @@ function mudarStatus(id,novoSt){
         // Cria caixa automático com saldo 0
         currentCaixa={id:uid(),tenant_id:currentTenant?.id,saldo_inicial:0,contagem_abertura:{},total_esperado:0,status:'aberto',aberto_em:new Date().toISOString(),auto_aberto:true};
         DATA.caixas.push(currentCaixa);
-        salvarDados();
+        if(_sb&&_sbTenantId)_sbUpsert('caixas',currentCaixa).catch(function(){});
+        try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}
         toast('📂 Caixa aberto automaticamente para registrar o serviço.','info');
       }
     }
@@ -3357,7 +3358,8 @@ function mudarStatus(id,novoSt){
         if(deducoes.length>0){
           setTimeout(()=>toast('📦 Estoque deduzido: '+deducoes.slice(0,2).join(', ')+(deducoes.length>2?' +'+( deducoes.length-2)+'mais':''),'success'),400);
           logAuditoria('Dedução de Estoque','Serviço: '+(serv.nome)+' | '+deducoes.join(', '));
-          salvarDados();
+          deducoes.forEach(function(nomeProd){var pp=DATA.produtos.find(function(p){return p.nome===nomeProd&&p.tenant_id===currentTenant?.id;});if(pp&&_sb&&_sbTenantId)_sbUpsert('produtos',{id:pp.id,tenant_id:pp.tenant_id,quantidade_atual:pp.quantidade_atual,saldo_atual:pp.quantidade_atual,updated_at:new Date().toISOString()}).catch(function(){});});
+          try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}
         }
       }
     }
@@ -3376,7 +3378,7 @@ function mudarStatus(id,novoSt){
       const cli=DATA.clientes.find(c=>c.id===ag.cliente_id);
       if(cli) _sbUpsert('clientes',{id:cli.id,tenant_id:cli.tenant_id,pontos_fidelidade:cli.pontos_fidelidade});
     }
-  } else { salvarDados(); }
+  } else { try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){} }
   renderAgendamentos();renderAgenda();renderDashboard();toast('Status: '+statusLabel(novoSt));
 }
 
@@ -3823,12 +3825,13 @@ async function salvarAgendamento(){
     } else {
       const idx=DATA.agendamentos.findIndex(a=>a.id===agId);
       if(idx>=0) Object.assign(DATA.agendamentos[idx],agFull); else DATA.agendamentos.push(agFull);
-      salvarDados();
+      try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){}
     }
   } else {
     const idx=DATA.agendamentos.findIndex(a=>a.id===agId);
     if(idx>=0) Object.assign(DATA.agendamentos[idx],agFull); else DATA.agendamentos.push(agFull);
-    salvarDados();
+    try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){}
+    toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   if(_sbTenantId) _sbLogAuditoria(id?'Editou Agendamento':'Novo Agendamento','Agenda','');
   closeModal('modalAgendamento');renderAgendamentos();renderAgenda();renderDashboard();toast('Agendamento salvo!');
@@ -3916,7 +3919,7 @@ async function salvarCliente(){
     console.warn('[GBR] salvarCliente: sem Supabase (_sbReady='+_sbReady+', _sbTenantId='+_sbTenantId+'). Dados salvos APENAS localmente.');
     const idx2=DATA.clientes.findIndex(c=>c.id===dados.id);
     if(idx2>=0) Object.assign(DATA.clientes[idx2],dados); else DATA.clientes.push(dados);
-    salvarDados();
+    try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}
     toast('⚠️ Sem conexão com a nuvem. Dado salvo localmente.', 'warn');
   }
   if(typeof logAuditoria==='function')logAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente',dados.nome_completo);
@@ -3938,19 +3941,20 @@ async function salvarCliente(){
   }
 }
 
-function excluirCliente(id){
-  if(!confirm('Desativar este cliente?')) return;
+async function excluirCliente(id){
+  if(!confirm('Desativar este cliente?'))return;
   const i=DATA.clientes.findIndex(c=>c.id===id);
-  if(i<0) return;
+  if(i<0)return;
   DATA.clientes[i].ativo=false;
-  if(_sb && _sbTenantId) {
-    _sbSoftDelete('clientes', id);
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Removendo...');
+    const r=await _sb.from('clientes').update({ativo:false,updated_at:new Date().toISOString()}).eq('id',id);
+    if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
+    else{try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
   } else {
-    console.warn('[GBR] excluirCliente: sem Supabase. Soft-delete salvo apenas localmente.');
-    salvarDados();
+    try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}
   }
-  renderClientes();
-  toast('Cliente desativado');
+  renderClientes();toast('Cliente desativado');
 }
 
 // ===== SERVIÇOS =====
@@ -4022,7 +4026,20 @@ async function salvarServico(){
   if(typeof logAuditoria==='function')logAuditoria(id?'Editou Serviço':'Novo Serviço',nome);
 }
 
-function excluirServico(id){if(!confirm('Excluir serviço?'))return;const i=DATA.servicos.findIndex(s=>s.id===id);if(i>=0){DATA.servicos[i].ativo=false;if(_sb&&_sbTenantId)_sbSoftDelete('servicos',id);else salvarDados();renderServicos();toast('Serviço removido');}}
+async function excluirServico(id){
+  if(!confirm('Excluir serviço?'))return;
+  const i=DATA.servicos.findIndex(s=>s.id===id);
+  if(i>=0){
+    DATA.servicos[i].ativo=false;
+    if(_sb&&_sbTenantId){
+      _gbrAtualizarIndicadorSync('saving','Removendo...');
+      const r=await _sb.from('servicos').update({ativo:false,updated_at:new Date().toISOString()}).eq('id',id);
+      if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
+      else{try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+    } else {try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){}}
+    renderServicos();toast('Serviço removido');
+  }
+}
 
 // ===== ESTOQUE =====
 function renderEstoque(){
@@ -4178,7 +4195,20 @@ async function salvarMovEstoque(){
   closeModal('modalMovEstoque');renderEstoque();renderDashboard();toast('Estoque atualizado!');
 }
 
-function excluirProduto(id){if(!confirm('Excluir produto?'))return;const i=DATA.produtos.findIndex(p=>p.id===id);if(i>=0){DATA.produtos[i].ativo=false;if(_sb&&_sbTenantId)_sbSoftDelete('produtos',id);else salvarDados();renderEstoque();toast('Produto removido');}}
+async function excluirProduto(id){
+  if(!confirm('Excluir produto?'))return;
+  const i=DATA.produtos.findIndex(p=>p.id===id);
+  if(i>=0){
+    DATA.produtos[i].ativo=false;
+    if(_sb&&_sbTenantId){
+      _gbrAtualizarIndicadorSync('saving','Removendo...');
+      const r=await _sb.from('produtos').update({ativo:false,updated_at:new Date().toISOString()}).eq('id',id);
+      if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
+      else{try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+    } else {try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}}
+    renderEstoque();toast('Produto removido');
+  }
+}
 
 // ===== FICHA TÉCNICA =====
 function renderFichas(){
@@ -4203,7 +4233,13 @@ function abrirFicha(sid){
   editor.style.display='block';
   const serv=DATA.servicos.find(s=>s.id===sid);
   let ficha=DATA.fichas.find(f=>f.servico_id===sid);
-  if(!ficha){ficha={id:uid(),servico_id:sid,tenant_id:currentTenant?.id,insumos:[],custo_insumos:0,custo_mao_obra:0,custo_desgaste:0,custo_fixo:0};DATA.fichas.push(ficha);salvarDados();}
+  if(!ficha){
+    ficha={id:uid(),servico_id:sid,tenant_id:currentTenant?.id,insumos:[],custo_insumos:0,custo_mao_obra:0,custo_desgaste:0,custo_fixo:0};
+    DATA.fichas.push(ficha);
+    // Salvar nova ficha imediatamente no Supabase
+    _sbSyncFichas();
+    try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}
+  }
   _fichaAtual=ficha;_servAtual=serv;
   renderFichaEditor();
 }
@@ -4281,7 +4317,7 @@ function renderFichaEditor(){
     '<div class="form-row-3">'+
     '<div class="form-group"><label for="fichaVlHora">Valor da Hora (R$)</label>'+
     '<input type="number" id="fichaVlHora" value="'+(valorHora||0)+'" min="0" step="0.50" placeholder="25.00" '+
-    'oninput="_fichaAtual.valor_hora_manual=+this.value;_servAtual.valor_hora=+this.value;_recalcFichaSummary();salvarDados()">'+
+    'oninput="_fichaAtual.valor_hora_manual=+this.value;_servAtual.valor_hora=+this.value;_recalcFichaSummary();_sbSyncFichas()">'+
     '<div style="font-size:10px;color:var(--text2);margin-top:2px">Ou edite direto no cadastro do serviço</div></div>'+
     '<div class="form-group"><label for="maoObraCalc">Tempo do serviço (min)</label>'+
     '<input type="number" value="'+tempoMin+'" min="1" step="5" readonly style="background:var(--bg3);color:var(--text2)">'+
@@ -4296,11 +4332,11 @@ function renderFichaEditor(){
     '<div class="form-row-3">'+
     '<div class="form-group"><label for="fichaDesgasteVal">Desgaste de equipamentos (R$)</label>'+
     '<input type="number" id="fichaDesgasteVal" value="'+(custoDesg||0)+'" min="0" step="0.01" '+
-    'oninput="_fichaAtual.custo_desgaste=+this.value;_recalcFichaSummary();salvarDados()"></div>'+
+    'oninput="_fichaAtual.custo_desgaste=+this.value;_recalcFichaSummary();_sbSyncFichas()"></div>'+
     '<div class="form-group"><label for="fichaFixoPct">Custo fixo (% sobre preço) <span style="font-size:10px;color:var(--text2)">aluguel+luz÷serviços/mês</span></label>'+
     '<div style="display:flex;align-items:center;gap:6px">'+
     '<input type="number" id="fichaFixoPct" value="'+custoFixoPct+'" min="0" max="100" step="0.1" style="flex:1" '+
-    'oninput="_fichaAtual.custo_fixo_pct=+this.value;_fichaAtual.custo_fixo=(_servAtual.preco_base*(+this.value/100));_recalcFichaSummary();salvarDados()">'+
+    'oninput="_fichaAtual.custo_fixo_pct=+this.value;_fichaAtual.custo_fixo=(_servAtual.preco_base*(+this.value/100));_recalcFichaSummary();_sbSyncFichas()">'+
     '<span style="font-size:12px;color:var(--text2);white-space:nowrap">% = '+fmtMoney(custoFixoVal)+'</span></div>'+
     '</div>'+
     '</div></div>';
@@ -4325,7 +4361,7 @@ function addInsumoFicha(){
   const prods=DATA.produtos.filter(p=>currentTenant&&p.tenant_id===currentTenant.id&&p.ativo);
   if(!prods.length){toast('Cadastre produtos primeiro','error');return;}
   _fichaAtual.insumos.push({produto_id:'',quantidade:100,custo:0});
-  salvarDados();renderFichaEditor();
+  _sbSyncFichas();try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}renderFichaEditor();
 }
 
 function trocarProdFicha(idx,pid){
@@ -4333,7 +4369,7 @@ function trocarProdFicha(idx,pid){
   const cu=p.custo_por_embalagem/(p.quantidade_por_embalagem||1);
   _fichaAtual.insumos[idx].produto_id=pid;
   _fichaAtual.insumos[idx].custo=cu*_fichaAtual.insumos[idx].quantidade;
-  salvarDados();renderFichaEditor();
+  _sbSyncFichas();try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}renderFichaEditor();
 }
 
 function qtdInsumo(idx,val){
@@ -4343,7 +4379,9 @@ function qtdInsumo(idx,val){
   if(p){const cu=p.custo_por_embalagem/(p.quantidade_por_embalagem||1);ins.custo=cu*val;}
   // Recalcula totais reativamente sem re-renderizar o editor inteiro
   _recalcFichaSummary();
-  salvarDados();
+  // ── Sync ficha para Supabase ──
+  _sbSyncFichas();
+  try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}
 }
 function _recalcFichaSummary(){
   if(!_fichaAtual || !_servAtual) return;
@@ -4381,7 +4419,7 @@ function _recalcFichaSummary(){
 }
 
 
-function removerInsumoFicha(idx){_fichaAtual.insumos.splice(idx,1);salvarDados();renderFichaEditor();}
+function removerInsumoFicha(idx){_fichaAtual.insumos.splice(idx,1);_sbSyncFichas();try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}renderFichaEditor();}
 
 // ===== FIDELIDADE =====
 function atualizarFidAlerts(){
@@ -4909,7 +4947,7 @@ function alterarSenhaConfig(){
   if(nova.length<6){toast('Mínimo 6 caracteres','error');return;}
   if(nova!==conf){toast('Senhas não conferem','error');return;}
   const i=DATA.users.findIndex(u=>u.id===currentUser.id);
-  if(i>=0){DATA.users[i].password=nova;salvarDados();currentUser.password=nova;}
+  if(i>=0){DATA.users[i].password=nova;try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}currentUser.password=nova;}
   ['cfgSenhaAtual','cfgNovaSenha','cfgConfirmaSenha'].forEach(id=>document.getElementById(id).value='');
   toast('Senha alterada com sucesso!');
 }
@@ -5318,7 +5356,10 @@ function salvarUsuario(){
     if(typeof logAuditoria==='function')logAuditoria('Console: Criou Usuário',nome+' ('+role+')');
     setTimeout(()=>{alert('✅ Usuário criado!\n\nEmail: '+email+'\nSenha temporária: '+_tmpPwd2+'\n\n⚠ O usuário deverá trocar a senha no primeiro acesso.');},300);
   }
-  salvarDados();closeModal('modalUsuario');toast('Usuário salvo!');GBR_API._notifyConsole('users_changed');
+  // Sync usuario no Supabase via global_settings
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
+  closeModal('modalUsuario');toast('Usuário salvo!');GBR_API._notifyConsole('users_changed');
 }
 
 function resetarSenha(id){
@@ -5330,7 +5371,7 @@ function resetarSenha(id){
     DATA.users[i].password=nova;
     DATA.users[i].must_change_password=true;
     if(typeof logAuditoria==='function')logAuditoria('Console: Reset de Senha',u.nome);
-    salvarDados();GBR_API._notifyConsole('users_changed');
+    if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){};GBR_API._notifyConsole('users_changed');
     alert('🔑 Nova senha para '+u.nome+':\n\n'+nova+'\n\nO usuário deverá trocar no próximo login.');
   }
 }
@@ -5341,7 +5382,7 @@ function toggleUsuario(id){
   if(i>=0){
     DATA.users[i].ativo=!DATA.users[i].ativo;
     if(typeof logAuditoria==='function')logAuditoria('Console: '+(DATA.users[i].ativo?'Ativou':'Desativou')+' Usuário',u.nome);
-    salvarDados();GBR_API._notifyConsole('users_changed');
+    if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){};GBR_API._notifyConsole('users_changed');
     toast(DATA.users[i].ativo?'Usuário ativado':'Usuário desativado');
   }
 }
@@ -5633,7 +5674,9 @@ function salvarNPS(){
   if(!nota){toast('Selecione a nota (1-10)','error');return;}
   if(!DATA.nps_avaliacoes)DATA.nps_avaliacoes=[];
   DATA.nps_avaliacoes.push({id:uid(),tenant_id:currentTenant.id,cliente_id:cliId,nota,comentario:document.getElementById('npsComentario').value.trim(),created_at:new Date().toISOString()});
-  salvarDados();closeModal('modalNPS');renderNPSSection();toast('Avaliação salva! ⭐');
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'nps_'+_sbTenantId,value:DATA.nps_avaliacoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_nps_avaliacoes',JSON.stringify(DATA.nps_avaliacoes));}catch(e){}
+  closeModal('modalNPS');renderNPSSection();toast('Avaliação salva! ⭐');
 }
 
 // Enviar pesquisa NPS via WhatsApp para o cliente
@@ -5653,7 +5696,8 @@ function enviarNPSWhatsApp(clienteId){
 function registrarNPSResposta(clienteId, nota, comentario){
   if(!DATA.nps_avaliacoes)DATA.nps_avaliacoes=[];
   DATA.nps_avaliacoes.push({id:uid(),tenant_id:currentTenant?.id,cliente_id:clienteId,nota:parseInt(nota)||0,comentario:comentario||'',via_whatsapp:true,created_at:new Date().toISOString()});
-  salvarDados();
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'nps_'+_sbTenantId,value:DATA.nps_avaliacoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_nps_avaliacoes',JSON.stringify(DATA.nps_avaliacoes));}catch(e){}
   if(typeof renderNPSSection==='function')renderNPSSection();
   toast('NPS registrado!','success');
 }
@@ -5676,7 +5720,7 @@ function renderWhatsapp(){
   if(!DATA.wa_templates)DATA.wa_templates=[];
   if(!DATA.wa_historico)DATA.wa_historico=[];
   const tenantTpls=DATA.wa_templates.filter(t=>!t.tenant_id||t.tenant_id===currentTenant?.id);
-  if(!tenantTpls.length){DATA.wa_templates.push(...WA_TEMPLATES_DEFAULT.map(t=>({...t,tenant_id:currentTenant?.id})));salvarDados();}
+  if(!tenantTpls.length){DATA.wa_templates.push(...WA_TEMPLATES_DEFAULT.map(t=>({...t,tenant_id:currentTenant?.id})));if(_sb&&_sbTenantId){DATA.wa_templates.filter(t=>t.tenant_id===currentTenant?.id).forEach(function(t){_sbUpsert('wa_templates',t).catch(function(){});});}try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}}
   const tpls=DATA.wa_templates.filter(t=>!t.tenant_id||t.tenant_id===currentTenant?.id);
   // Cabeçalho com botão de alternar view de envio em massa
   const tplListHtml=tpls.map(t=>'<div class="wa-tpl-card" id="watpl-'+t.id+'" onclick="selecionarWaTpl(\''+t.id+'\')"><div class="wa-tpl-name">'+t.nome+'</div><div class="wa-tpl-cat">'+(t.cat||t.categoria||'')+'</div></div>').join('');
@@ -5773,7 +5817,9 @@ function enviarWhatsapp(){
   window.open('https://wa.me/55'+tel+'?text='+encodeURIComponent(res.msg),'_blank');
   if(!DATA.wa_historico)DATA.wa_historico=[];
   DATA.wa_historico.push({id:uid(),tenant_id:currentTenant?.id,cliente_id:res.cli.id,template:_waTplSelecionado.nome,created_at:new Date().toISOString()});
-  salvarDados();renderWhatsapp();toast('WhatsApp aberto!','success');
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'wa_historico_'+_sbTenantId,value:DATA.wa_historico,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_wa_historico',JSON.stringify(DATA.wa_historico));}catch(e){}
+  renderWhatsapp();toast('WhatsApp aberto!','success');
 }
 function copiarMensagemWA(){
   const res=previewWaMensagem();if(!res?.msg)return;
@@ -5790,19 +5836,37 @@ function editarWaTpl(id){
   document.getElementById('waTplNome').value=tpl.nome;document.getElementById('waTplMsg').value=tpl.msg;document.getElementById('waTplCat').value=tpl.cat||'Confirmação';
   openModal('modalWaTpl');
 }
-function salvarWaTpl(){
-  const nome=document.getElementById('waTplNome').value.trim();const msg=document.getElementById('waTplMsg').value.trim();
+async function salvarWaTpl(){
+  const nome=document.getElementById('waTplNome').value.trim();
+  const msg=document.getElementById('waTplMsg').value.trim();
   if(!nome||!msg){toast('Preencha nome e mensagem','error');return;}
   if(!DATA.wa_templates)DATA.wa_templates=[];
   const id=document.getElementById('waTplId').value;
-  if(id){const i=DATA.wa_templates.findIndex(t=>t.id===id);if(i>=0){DATA.wa_templates[i].nome=nome;DATA.wa_templates[i].msg=msg;DATA.wa_templates[i].cat=document.getElementById('waTplCat').value;}}
-  else DATA.wa_templates.push({id:uid(),tenant_id:currentTenant?.id,nome,msg,cat:document.getElementById('waTplCat').value});
-  salvarDados();closeModal('modalWaTpl');renderWhatsapp();toast('Template salvo!');
+  const tplId=id||uid();
+  const tpl={id:tplId,tenant_id:currentTenant?.id,nome,msg,cat:document.getElementById('waTplCat').value,updated_at:new Date().toISOString()};
+  if(id){const i=DATA.wa_templates.findIndex(t=>t.id===id);if(i>=0)Object.assign(DATA.wa_templates[i],tpl);}
+  else DATA.wa_templates.push(tpl);
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Salvando template...');
+    const saved=await _sbUpsert('wa_templates',tpl);
+    if(saved){_gbrAtualizarIndicadorSync('ok','Salvo na nuvem ✓');}
+    else{try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+  } else {
+    try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}
+  }
+  closeModal('modalWaTpl');renderWhatsapp();toast('Template salvo!');
 }
-function excluirWaTpl(id){
+async function excluirWaTpl(id){
   if(!confirm('Excluir este template?'))return;
   DATA.wa_templates=DATA.wa_templates.filter(t=>t.id!==id);
-  salvarDados();renderWhatsapp();
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Removendo...');
+    const r=await _sb.from('wa_templates').delete().eq('id',id);
+    if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
+    else{try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+  } else {try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}}
+  renderWhatsapp();
   document.getElementById('waSendPanel').innerHTML='<div class="empty" style="padding:40px"><div class="empty-icon">💬</div><div class="empty-title">Template excluído</div></div>';
   toast('Template excluído');
 }
@@ -5854,7 +5918,7 @@ function logAuditoria(acao,detalhes){
   });
   // Manter últimos 500 registros
   if(DATA.auditoria.length>500)DATA.auditoria=DATA.auditoria.slice(-500);
-  salvarDados();
+  try{localStorage.setItem('gbr_auditoria',JSON.stringify(DATA.auditoria));}catch(e){}
 }
 
 // showPage unificado — overrides removidos para evitar recursão
@@ -5969,37 +6033,49 @@ function editarMovFin(id){
   document.getElementById('fin_forma').value=m.forma||'pix';
   openModal('modalMovFinanceiro');
 }
-function salvarMovFinanceiro(){
+async function salvarMovFinanceiro(){
   const id=document.getElementById('finMovId').value;
   const tipo=document.getElementById('finMovTipoHid').value;
   const valor=parseFloat(document.getElementById('fin_valor').value)||0;
   const desc=document.getElementById('fin_desc').value.trim();
   if(!valor||!desc){toast('Preencha valor e descrição','error');return;}
-  const dados={tipo,valor,descricao:desc,data:document.getElementById('fin_data').value,categoria:document.getElementById('fin_cat').value,forma:document.getElementById('fin_forma').value,observacao:document.getElementById('fin_obs').value,usuario:currentUser?.nome,usuario_id:currentUser?.id,tenant_id:currentTenant?.id};
+  const dados={tipo,valor,descricao:desc,data:document.getElementById('fin_data').value,
+    categoria:document.getElementById('fin_cat').value,forma:document.getElementById('fin_forma').value,
+    observacao:document.getElementById('fin_obs').value,usuario:currentUser?.nome,
+    usuario_id:currentUser?.id,tenant_id:currentTenant?.id};
   const mId=id||uid();
-  const mFull={id:mId,...dados,criado_em:new Date().toISOString()};
+  const mFull={id:mId,...dados,created_at:new Date().toISOString()};
+  // Atualizar DATA local imediatamente
+  if(id){const i=DATA.movimentacoes_fin.findIndex(m=>m.id===id);if(i>=0)Object.assign(DATA.movimentacoes_fin[i],dados);}
+  else{DATA.movimentacoes_fin.push(mFull);logAuditoria('Registrou '+tipo,'R$ '+valor+' — '+desc);}
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
-    _sbUpsert('movimentacoes_financeiras',{
-      id:mId,tenant_id:currentTenant?.id,tipo,valor,descricao:desc,
+    _gbrAtualizarIndicadorSync('saving','Salvando movimentação...');
+    const sbObj={id:mId,tenant_id:currentTenant?.id,tipo,valor,descricao:desc,
       categoria:dados.categoria,forma_pagamento:dados.forma,
-      criado_em:mFull.criado_em
-    }).then(function(saved){
-      if(!id){DATA.movimentacoes_fin.push(mFull);}
-      else{const i=DATA.movimentacoes_fin.findIndex(m=>m.id===id);if(i>=0)Object.assign(DATA.movimentacoes_fin[i],dados);}
-    });
+      data:dados.data,observacao:dados.observacao,
+      created_at:mFull.created_at,updated_at:new Date().toISOString()};
+    const saved=await _sbUpsert('movimentacoes_financeiras',sbObj);
+    if(saved){_gbrAtualizarIndicadorSync('ok','Salvo na nuvem ✓');}
+    else{try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
   } else {
-    if(id){const i=DATA.movimentacoes_fin.findIndex(m=>m.id===id);if(i>=0){const antigo=DATA.movimentacoes_fin[i];logAuditoria('Editou Movimentação','De: '+fmtMoney(antigo.valor)+' → '+fmtMoney(valor));Object.assign(DATA.movimentacoes_fin[i],dados);}}
-    else{DATA.movimentacoes_fin.push({id:mId,...dados,created_at:new Date().toISOString()});logAuditoria('Registrou '+tipo,'R$ '+valor+' — '+desc);}
-    salvarDados();
+    try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}
+    toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   closeModal('modalMovFinanceiro');renderFinanceiro();toast('Movimentação salva!');
 }
-function excluirMovFin(id){
+async function excluirMovFin(id){
   const m=DATA.movimentacoes_fin.find(x=>x.id===id);
   if(!confirm('Excluir esta movimentação?'))return;
-  logAuditoria('Excluiu Movimentação',m?.descricao+' — '+fmtMoney(m?.valor||0));
+  logAuditoria('Excluiu Movimentação',(m?.descricao||'')+' — '+fmtMoney(m?.valor||0));
   DATA.movimentacoes_fin=DATA.movimentacoes_fin.filter(x=>x.id!==id);
-  salvarDados();renderFinanceiro();toast('Movimentação excluída');
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Removendo...');
+    const r=await _sb.from('movimentacoes_financeiras').delete().eq('id',id);
+    if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
+    else{try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+  } else {try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}}
+  renderFinanceiro();toast('Movimentação excluída');
 }
 
 // ══ SUPORTE / TICKETS ════════════════════════════════════
@@ -6106,10 +6182,19 @@ async function salvarTicket(){
     logAuditoria('Abriu Chamado','#'+novoNum+' — '+titulo);
     await _syncTicketSb(novoId, novoTicket);
   }
-  salvarDados();closeModal('modalTicket');renderTickets();
+  try{localStorage.setItem('gbr_tickets',JSON.stringify(DATA.tickets));}catch(e){}
+  closeModal('modalTicket');renderTickets();
   toast(id?'Chamado atualizado!':'Chamado aberto com sucesso!','success');
 }
-function excluirTicket(id){if(!confirm('Excluir este chamado?'))return;const t=DATA.tickets.find(x=>x.id===id);logAuditoria('Excluiu Ticket','#'+t?.numero+' — '+t?.titulo);DATA.tickets=DATA.tickets.filter(x=>x.id!==id);salvarDados();renderTickets();toast('Chamado excluído');}
+async function excluirTicket(id){
+  if(!confirm('Excluir este chamado?'))return;
+  const t=DATA.tickets.find(x=>x.id===id);
+  logAuditoria('Excluiu Ticket','#'+t?.numero+' — '+t?.titulo);
+  DATA.tickets=DATA.tickets.filter(x=>x.id!==id);
+  if(_sb&&_sbTenantId){await _sb.from('tickets').delete().eq('id',id);}
+  try{localStorage.setItem('gbr_tickets',JSON.stringify(DATA.tickets));}catch(e){}
+  renderTickets();toast('Chamado excluído');
+}
 function verTicket(id){editarTicket(id);}
 
 // ══ ADMIN COMPLETO ════════════════════════════════════════
@@ -6362,7 +6447,9 @@ function salvarUsuarioAdmin(){
     if(!senha)setTimeout(()=>alert('🔑 Usuário criado!\n\nEmail: '+email+'\nSenha temporária: '+_tmpPwd3+'\n\nO usuário deverá trocar a senha no primeiro acesso.'),300);
     logAuditoria('Criou Usuário',nome+' — '+role);
   }
-  salvarDados();closeModal('modalUsuarioAdmin');renderAdminAcessos();toast('Usuário salvo!');
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
+  closeModal('modalUsuarioAdmin');renderAdminAcessos();toast('Usuário salvo!');
 }
 function resetSenhaAdmin(id){
   const u=DATA.users.find(x=>x.id===id);if(!u)return;
@@ -6372,7 +6459,7 @@ function resetSenhaAdmin(id){
   if(i>=0){
     DATA.users[i].password=nova;
     DATA.users[i].must_change_password=true;
-    salvarDados();
+    if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){};
     logAuditoria('Resetou Senha',DATA.users[i].nome);
     renderAdminAcessos();
     alert('🔑 Senha gerada para '+u.nome+':\n\n'+nova+'\n\nO usuário deverá trocar no próximo acesso.');
@@ -6380,7 +6467,7 @@ function resetSenhaAdmin(id){
 }
 function toggleUserAdmin(id){
   const i=DATA.users.findIndex(u=>u.id===id);
-  if(i>=0){DATA.users[i].ativo=!DATA.users[i].ativo;logAuditoria(DATA.users[i].ativo?'Ativou':'Desativou'+' Usuário',DATA.users[i].nome);salvarDados();renderAdminAcessos();toast(DATA.users[i].ativo?'Usuário ativado':'Usuário desativado');}
+  if(i>=0){DATA.users[i].ativo=!DATA.users[i].ativo;logAuditoria(DATA.users[i].ativo?'Ativou':'Desativou'+' Usuário',DATA.users[i].nome);if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}renderAdminAcessos();toast(DATA.users[i].ativo?'Usuário ativado':'Usuário desativado');}
 }
 
 // Permissões
@@ -6405,7 +6492,7 @@ function renderPermGrid(){
   const labels={'ver_dashboard':'Ver Dashboard','ver_agenda':'Ver Agenda','editar_agendamento':'Editar Agendamento','cancelar_agendamento':'Cancelar Agendamento','ver_clientes':'Ver Clientes','editar_clientes':'Editar Clientes','ver_caixa':'Ver Caixa','abrir_fechar_caixa':'Abrir/Fechar Caixa','ver_financeiro':'Ver Financeiro','editar_financeiro':'Editar Financeiro','ver_relatorios':'Ver Relatórios','ver_estoque':'Ver Estoque','editar_estoque':'Editar Estoque','ver_checklist':'Ver Checklist','editar_checklist':'Editar Checklist','ver_whatsapp':'Ver WhatsApp','ver_fidelidade':'Ver Fidelidade','dar_desconto':'Aplicar Descontos','ver_admin':'Ver Painel Admin'};
   el.innerHTML='<div class="perm-grid">'+PERMISSOES_LISTA.map(p=>'<div class="perm-item"><input type="checkbox" id="perm_'+p+'" '+(perms[p]?'checked':'')+' onchange="DATA.permissoes[\''+_roleTab+'\'][\''+p+'\']=this.checked"><label for="perm_'+p+'" style="cursor:pointer">'+labels[p]+'</label></div>').join('')+'</div>';
 }
-function salvarPermissoes(){logAuditoria('Salvou Permissões','Perfil: '+_roleTab);salvarDados();toast('Permissões salvas!');}
+async function salvarPermissoes(){logAuditoria('Salvou Permissões','Perfil: '+_roleTab);if(_sb&&_sbTenantId){await _sb.from('global_settings').upsert({key:'permissoes_'+_sbTenantId,value:DATA.permissoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_permissoes',JSON.stringify(DATA.permissoes));}catch(e){}toast('Permissões salvas na nuvem! ✓');}
 
 // ── Regras Admin ──────────────────────────────────────────
 function renderAdminRegras(){
@@ -6425,13 +6512,17 @@ function salvarRegrasDesconto(){
   const _rSenha=document.getElementById('rSenhaAdm').value;
   const _senhaToSave=_rSenha.startsWith('••')?(DATA.configuracoes[tid]?.senha_admin||''):_rSenha;
   Object.assign(DATA.configuracoes[tid],{desc_sem_senha:+document.getElementById('rDescSem').value||10,desc_com_senha:+document.getElementById('rDescCom').value||50,senha_admin:_senhaToSave});
-  logAuditoria('Salvou Regras de Desconto','');salvarDados();toast('Regras de desconto salvas!');
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  logAuditoria('Salvou Regras de Desconto','');toast('Regras de desconto salvas! ✓');
 }
 function salvarAutomacoes(){
   const tid=currentTenant?.id;
   if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   Object.assign(DATA.configuracoes[tid],{auto_fidelidade:document.getElementById('autoFidelidade').checked,auto_caixa:document.getElementById('autoCaixa').checked,auto_aniversario:document.getElementById('autoAniversario').checked,auto_estoque:document.getElementById('autoEstoque').checked});
-  logAuditoria('Salvou Automações','');salvarDados();toast('Automações salvas!');
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  logAuditoria('Salvou Automações','');toast('Automações salvas! ✓');
 }
 // ── FUNÇÕES LEGADAS (DEPRECATED) — NÃO REMOVER, apenas stub seguro ──────────
 // Bug #8: resetModulo() substituída por confirmarResetCategoria()
@@ -6527,7 +6618,8 @@ function importarDados(input){
       });
 
       logAuditoria('Importou Dados',file.name);
-      salvarDados(); // salva no localStorage
+      _sbSyncBulk();
+      try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}
 
       if(_sbReady && _sbTenantId){
         toast('Importando para a nuvem...','info');
@@ -6609,7 +6701,9 @@ function salvarEmpresaAdmin(){
     maps_api:(document.getElementById('adm_maps_api').value.startsWith('••')?(DATA.tenants.find(t=>t.id===currentTenant?.id)?.config_empresa?.maps_api||''):document.getElementById('adm_maps_api').value)};
   DATA.tenants[i].config_empresa=cfg;
   if(cfg.nome){DATA.tenants[i].nome=cfg.nome;document.getElementById('tenantNome').textContent=cfg.nome;}
-  logAuditoria('Editou Dados da Empresa',cfg.nome);salvarDados();toast('Dados salvos!');
+  if(_sb&&_sbTenantId){_sb.from('tenants').update({config_empresa:cfg,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
+  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  logAuditoria('Editou Dados da Empresa',cfg.nome);toast('Dados salvos na nuvem! ✓');
 }
 function salvarIntegAdmin(){salvarEmpresaAdmin();}
 
@@ -6639,7 +6733,8 @@ function salvarEmpresaAdminCompleto(){
   const cfgVkm=document.getElementById('cfgValorKmLT');
   if(cfgCep)cfgCep.value=cepBase;
   if(cfgVkm)cfgVkm.value=vkm||'';
-  salvarDados();
+  if(_sb&&_sbTenantId){_sb.from('tenants').update({config:DATA.configuracoes[currentTenant?.id]||{},atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
+  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
   // Persistir vagas_por_horario no Supabase (tenant)
   if(_sb&&_sbTenantId){
     var vagasConf = DATA.configuracoes[tid]?.vagas_simultaneas || 1;
@@ -6681,7 +6776,7 @@ function carregarLogo(input){
   reader.onload=e=>{
     document.getElementById('logoPreviewWrap').innerHTML='<img src="'+e.target.result+'" class="logo-preview"><br><div style="font-size:11px;color:var(--text2);margin-top:6px">Clique para trocar</div>';
     const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
-    if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.logo=e.target.result;salvarDados();}
+    if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.logo=e.target.result;if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants[i].aparencia,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}}
     // Aplicar no logo-box
     const lb=document.querySelector('.logo-box');if(lb)lb.innerHTML='<img src="'+e.target.result+'" style="width:100%;max-height:52px;object-fit:contain;border-radius:6px">';
     toast('Logo carregado!');
@@ -6712,14 +6807,18 @@ function aplicarCoresCustom(){
   // Salvar no tenant
   const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
   if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};Object.assign(DATA.tenants[i].aparencia,{accent,bg,bg2,textColor});}
-  logAuditoria('Alterou Cores do Sistema','Accent: '+accent);salvarDados();toast('Cores aplicadas!');
+  if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:{accent,bg,bg2,textColor},atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
+  try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+  logAuditoria('Alterou Cores do Sistema','Accent: '+accent);toast('Cores aplicadas! ✓');
 }
 function resetCoresCustom(){
   const r=document.documentElement;
   r.style.removeProperty('--accent');r.style.removeProperty('--accent2');r.style.removeProperty('--bg');r.style.removeProperty('--bg2');r.style.removeProperty('--text');r.style.removeProperty('--accent-bg');
   const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
   if(i>=0&&DATA.tenants[i].aparencia)delete DATA.tenants[i].aparencia.accent;
-  salvarDados();toast('Cores resetadas!');
+  if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:null,atualizado_em:new Date().toISOString()}).eq('id',currentTenant?.id).catch(function(){});}
+  try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+  toast('Cores resetadas! ✓');
 }
 function salvarMarca(){
   const nome=document.getElementById('adm_sys_nome').value;
@@ -6731,7 +6830,9 @@ function salvarMarca(){
   const ver=document.querySelector('.logo-ver');if(ver&&sub)ver.textContent=sub;
   const ttl=document.querySelector('.login-logo h2');if(ttl&&nome)ttl.textContent=nome;
   document.title=nome||'GBR Sistemas';
-  logAuditoria('Editou Marca do Sistema',nome);salvarDados();toast('Marca aplicada!');
+  if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants?.find(t=>t.id===currentTenant?.id)?.aparencia||{},atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
+  try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+  logAuditoria('Editou Marca do Sistema',nome);toast('Marca aplicada! ✓');
 }
 function aplicarFontSize(){
   const sz=document.getElementById('adm_font_size').value;
@@ -6740,8 +6841,7 @@ function aplicarFontSize(){
 function atualizarMenuModulos(){
   const ativos=MODULOS_SISTEMA.filter(m=>{const el=document.getElementById('mod_'+m);return el?el.checked:true;});
   const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
-  if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.modulos_ativos=ativos;}
-  salvarDados();
+  if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.modulos_ativos=ativos;if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants[i].aparencia,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}}
 }
 function carregarAparenciaTenant(){
   if(!currentTenant?.aparencia)return;
@@ -6774,7 +6874,9 @@ function toggleInteg(key,val){
   const tid=currentTenant?.id;
   if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   DATA.configuracoes[tid]['integ_'+key]=val;
-  logAuditoria((val?'Ativou':'Desativou')+' Integração',key);salvarDados();toast((val?'Ativado':'Desativado')+': '+key);
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
+  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  logAuditoria((val?'Ativou':'Desativou')+' Integração',key);toast((val?'Ativado':'Desativado')+': '+key);
 }
 
 // ── Auditoria ─────────────────────────────────────────────
@@ -7085,7 +7187,7 @@ function confirmarResetCategoria(cat,nome){
     auditoria:()=>{DATA.auditoria=(DATA.auditoria||[]).filter(a=>a.tenant_id&&a.tenant_id!==tid);},
     checklists:()=>{DATA.checklists=DATA.checklists.filter(c=>c.tenant_id!==tid);},
   };
-  if(mapa[cat]){mapa[cat]();salvarDados();closeModal('modalResetSeletivo');logAuditoria('Reset Seletivo','Categoria: '+nome);toast('✓ '+nome+' limpo com sucesso!','success');}
+  if(mapa[cat]){mapa[cat]();_sbSyncBulk();try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){}try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}closeModal('modalResetSeletivo');logAuditoria('Reset Seletivo','Categoria: '+nome);toast('✓ '+nome+' limpo com sucesso!','success');}
   else{toast('Categoria inválida','error');}
 }
 
@@ -7105,7 +7207,7 @@ function _registrarSessao(user){
   // Remove sessão antiga do mesmo usuário
   DATA._sessoes=DATA._sessoes.filter(s=>s.userId!==user.id);
   DATA._sessoes.push(sessao);
-  salvarDados();
+  try{localStorage.setItem('gbr__sessoes',JSON.stringify(DATA._sessoes));}catch(e){}
   // Sincronizar sessão no Supabase para visibilidade multi-device
   if (_sb && _sbTenantId) {
     _sb.from('global_settings').upsert({
@@ -7118,7 +7220,7 @@ function _registrarSessao(user){
   if(window._sessaoHeartbeat)clearInterval(window._sessaoHeartbeat);
   window._sessaoHeartbeat=setInterval(()=>{
     const idx=DATA._sessoes.findIndex(s=>s.userId===user.id);
-    if(idx>=0){DATA._sessoes[idx].ultima_atividade=new Date().toISOString();DATA._sessoes[idx].online=true;salvarDados();}
+    if(idx>=0){DATA._sessoes[idx].ultima_atividade=new Date().toISOString();DATA._sessoes[idx].online=true;try{localStorage.setItem('gbr__sessoes',JSON.stringify(DATA._sessoes));}catch(e){}}
   },120000);
 }
 
@@ -7179,7 +7281,7 @@ function toggleWaAuto(val){
   const tid=currentTenant?.id;if(!tid)return;
   if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   DATA.configuracoes[tid].wa_auto_ativo=val;
-  salvarDados();
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){};
   toast(val?'✅ Automação WhatsApp ATIVA':'⏸ Automação WhatsApp pausada',val?'success':'warn');
   logAuditoria('WhatsApp Automação',val?'Ativada':'Desativada');
 }
@@ -7297,7 +7399,7 @@ window.GBR_API = (function() {
         must_change_password: true, ativo: true, created_at: new Date().toISOString()
       });
       logAuditoria('API: Criou Tenant', nome + ' | ' + ownerEmail);
-      salvarDados();
+      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
       return { tenant: _tenantSnapshot(DATA.tenants.at(-1)), owner_email: ownerEmail, temp_password: pwd };
     },
 
@@ -7315,7 +7417,7 @@ window.GBR_API = (function() {
         if (oi >= 0) DATA.users[oi].email = ownerEmail.toLowerCase();
       }
       logAuditoria('API: Editou Tenant', DATA.tenants[i].nome);
-      salvarDados();
+      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
       return _tenantSnapshot(DATA.tenants[i]);
     },
 
@@ -7325,7 +7427,7 @@ window.GBR_API = (function() {
       if (i < 0) throw new Error('Tenant não encontrado');
       DATA.tenants[i].ativo = !DATA.tenants[i].ativo;
       logAuditoria('API: ' + (DATA.tenants[i].ativo ? 'Ativou' : 'Suspendeu') + ' Tenant', DATA.tenants[i].nome);
-      salvarDados();
+      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
       return _tenantSnapshot(DATA.tenants[i]);
     },
 
@@ -7340,7 +7442,7 @@ window.GBR_API = (function() {
       DATA.tenants[i].data_expiracao = base.toISOString();
       DATA.tenants[i].ativo = true;
       logAuditoria('API: Renovou Licença', DATA.tenants[i].nome + ' +' + meses + 'meses');
-      salvarDados();
+      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
       return _tenantSnapshot(DATA.tenants[i]);
     },
 
@@ -7376,7 +7478,7 @@ window.GBR_API = (function() {
       DATA.users[i].password = nova;
       DATA.users[i].must_change_password = true;
       logAuditoria('API: Reset de Senha', DATA.users[i].nome);
-      salvarDados();
+      try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
       return { temp_password: nova };
     },
 
@@ -7386,7 +7488,7 @@ window.GBR_API = (function() {
       if (i < 0) throw new Error('Usuário não encontrado');
       DATA.users[i].ativo = !DATA.users[i].ativo;
       logAuditoria('API: ' + (DATA.users[i].ativo ? 'Ativou' : 'Desativou') + ' Usuário', DATA.users[i].nome);
-      salvarDados();
+      try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
       return _userSnapshot(DATA.users[i]);
     },
 
@@ -8382,7 +8484,7 @@ async function processarCSVEstoque(csvText) {
     }
   }
 
-  salvarDados(); renderEstoque();
+  _sbSyncBulk();try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){} renderEstoque();
   logAuditoria('Importação de Estoque', importados+' criados, '+atualizados+' atualizados'+(erros?' ('+erros+' erros)':''));
   if (erroDetalhes.length) console.warn('[GBR] Erros importação:', erroDetalhes);
   toast('✅ '+importados+' importados, '+atualizados+' atualizados!'+(erros?' ⚠️ '+erros+' com erro.':''), importados+atualizados>0?'success':'warn');
@@ -8432,7 +8534,7 @@ async function processarCSVClientes(csvText) {
       else { DATA.clientes.push(cli); if(_sb&&_sbTenantId) try{await _sbUpsert('clientes',cli);}catch(e){} imp++; }
     } catch(e){ err++; }
   }
-  salvarDados(); renderClientes();
+  _sbSyncBulk();try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){} renderClientes();
   logAuditoria('Importação de Clientes', imp+' criados, '+atu+' atualizados'+(err?' ('+err+' erros)':''));
   toast('✅ '+imp+' clientes importados, '+atu+' atualizados!'+(err?' ⚠️ '+err+' erros.':''), imp+atu>0?'success':'warn');
 }
@@ -8478,7 +8580,7 @@ async function processarCSVServicos(csvText) {
       else { DATA.servicos.push(srv); if(_sb&&_sbTenantId) try{await _sbUpsert('servicos',srv);}catch(e){} imp++; }
     } catch(e){ err++; }
   }
-  salvarDados(); renderServicos();
+  _sbSyncBulk();try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){} renderServicos();
   logAuditoria('Importação de Serviços', imp+' criados, '+atu+' atualizados'+(err?' ('+err+' erros)':''));
   toast('✅ '+imp+' serviços importados, '+atu+' atualizados!'+(err?' ⚠️ '+err+' erros.':''), imp+atu>0?'success':'warn');
 }
