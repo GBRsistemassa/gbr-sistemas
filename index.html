@@ -2187,6 +2187,8 @@ function _sbAtivarRealtime(tenantId) {
   if (!_sbReady || !tenantId) return;
   _sbChannels.forEach(function(ch) { try { _sb.removeChannel(ch); } catch(e) {} });
   _sbChannels = [];
+  if (window._gbrPollTimer) { clearInterval(window._gbrPollTimer); window._gbrPollTimer = null; }
+
   var tabelas = [
     ['agendamentos','agendamentos'],
     ['clientes','clientes'],
@@ -2199,22 +2201,36 @@ function _sbAtivarRealtime(tenantId) {
     ['checklists','checklists'],
     ['wa_templates','wa_templates']
   ];
+
+  var canaisAtivos = 0;
+  var totalCanais = tabelas.length + 2; // +tenant +notif
+
   tabelas.forEach(function(cfg) {
     try {
       var ch = _sb.channel('gbr_' + cfg[0] + '_' + tenantId)
         .on('postgres_changes', {
           event: '*', schema: 'public', table: cfg[0]
-          // FIX8: sem filter tenant_id para evitar erro de tipo UUID vs TEXT
-          // Filtragem é feita em _sbHandleChange pelo tenant_id local
+          // Sem filter para evitar erro UUID vs TEXT — filtragem local abaixo
         }, function(payload) {
-          // Filtrar localmente por tenant_id para manter isolamento
           var rec = payload.new || payload.old;
           if (rec && rec.tenant_id && String(rec.tenant_id) !== String(tenantId)) return;
           _sbHandleChange(cfg[1], payload);
         })
         .subscribe(function(s) {
-          if (s === 'SUBSCRIBED') console.log('[GBR RT] ' + cfg[0] + ' OK');
-          else if (s === 'CHANNEL_ERROR') console.warn('[GBR RT] Canal ' + cfg[0] + ' indisponível (tabela pode não existir)');
+          if (s === 'SUBSCRIBED') {
+            canaisAtivos++;
+            console.log('[GBR RT] ' + cfg[0] + ' OK (' + canaisAtivos + '/' + totalCanais + ')');
+            // Cancelar polling se todos os canais ficaram ativos
+            if (canaisAtivos >= totalCanais && window._gbrPollTimer) {
+              clearInterval(window._gbrPollTimer);
+              window._gbrPollTimer = null;
+              console.log('[GBR RT] Todos os canais ativos — polling desativado');
+            }
+          } else if (s === 'CHANNEL_ERROR') {
+            console.warn('[GBR RT] Canal ' + cfg[0] + ' indisponível');
+            // Ativar polling como fallback se canais falharem
+            _gbrAtivarPolling(tenantId);
+          }
         });
       _sbChannels.push(ch);
     } catch(eCh) { console.warn('[GBR RT] Erro ao criar canal', cfg[0]); }
@@ -2271,6 +2287,79 @@ function _sbAtivarRealtime(tenantId) {
   _sbChannels.push(notifCh);
 
   console.log('[GBR RT] ' + (tabelas.length + 2) + ' subscriptions ativas.');
+
+  // Fallback: iniciar polling após 8s se os canais Realtime não subirem
+  // (acontece quando as tabelas não estão na publicação supabase_realtime)
+  setTimeout(function() {
+    if (!window._gbrPollTimer && canaisAtivos < (tabelas.length / 2)) {
+      console.warn('[GBR RT] Menos da metade dos canais ativos — ativando polling de fallback (30s)');
+      _gbrAtivarPolling(tenantId);
+    }
+  }, 8000);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  POLLING FALLBACK — recarrega dados do Supabase a cada 30s
+//  Usado quando o Realtime não está disponível nas tabelas
+//  SOLUÇÃO DEFINITIVA: execute GBR_SQL_CORRECOES.sql no Supabase
+// ═══════════════════════════════════════════════════════════
+var _gbrPollTimer = null;
+var _gbrLastPoll = 0;
+function _gbrAtivarPolling(tenantId) {
+  if (window._gbrPollTimer) return; // já ativo
+  console.log('[GBR POLL] Iniciando polling de fallback a cada 30s');
+  _gbrAtualizarIndicadorSync('saving', 'Polling (Realtime indisponível)');
+  window._gbrPollTimer = setInterval(async function() {
+    if (!_sbReady || !tenantId || !currentUser) return;
+    var agora = Date.now();
+    if (agora - _gbrLastPoll < 28000) return;
+    _gbrLastPoll = agora;
+    try {
+      var tabelas = [
+        ['clientes','clientes'],
+        ['agendamentos','agendamentos'],
+        ['servicos','servicos'],
+        ['produtos','produtos'],
+        ['caixas','caixas'],
+        ['regras_fidelidade','regras_fidelidade'],
+      ];
+      var atualizado = false;
+      for (var i = 0; i < tabelas.length; i++) {
+        var cfg = tabelas[i];
+        var r = await _sb.from(cfg[0]).select('*').filter('tenant_id::text','eq',tenantId).limit(500);
+        if (!r.error && r.data && r.data.length > 0) {
+          var antes = JSON.stringify(DATA[cfg[1]]);
+          DATA[cfg[1]] = r.data;
+          if (JSON.stringify(DATA[cfg[1]]) !== antes) atualizado = true;
+        }
+      }
+      // Buscar notificações novas
+      var rN = await _sb.from('notifications')
+        .select('*').eq('tenant_id', tenantId).eq('ativo', true)
+        .order('created_at', {ascending: false}).limit(20);
+      if (!rN.error && rN.data) {
+        rN.data.forEach(function(n) {
+          var existe = _notifCache.find(function(x){ return x.id === n.id; });
+          if (!existe) {
+            var notif = {id:n.id, titulo:n.titulo||'', mensagem:n.mensagem||'',
+              tipo:n.tipo||'info', lida:n.lido||n.lida||false,
+              ts:n.created_at ? new Date(n.created_at).getTime() : Date.now()};
+            _notifCache.unshift(notif);
+            if (!notif.lida) {
+              toast('🔔 ' + notif.titulo, 'info');
+              renderNotifLista();
+              atualizarBadgeNotif();
+            }
+            atualizado = true;
+          }
+        });
+      }
+      if (atualizado) {
+        _gbrReRenderPaginaAtiva();
+        _gbrAtualizarIndicadorSync('ok', 'Atualizado (polling)');
+      }
+    } catch(e) { console.warn('[GBR POLL]', e.message); }
+  }, 30000);
 }
 
 function _sbHandleChange(chave, payload) {
@@ -2792,22 +2881,47 @@ async function fazerLogin() {
     _sbUserId    = authRes.data.user.id;
     _sbUserEmail = authRes.data.user.email;
 
-    // FIX: .maybeSingle() não lança erro quando 0 rows; sem .eq('ativo') que pode não existir
-    var utRes = await _sb.from('user_tenants')
-      .select('tenant_id, role, ativo')
-      .eq('user_id', _sbUserId)
-      .order('criado_em', {ascending: false})
-      .limit(1)
-      .maybeSingle();
-    if (utRes.error) {
-      // Tentar sem order (coluna criado_em pode não existir)
-      utRes = await _sb.from('user_tenants')
-        .select('tenant_id, role')
-        .eq('user_id', _sbUserId)
-        .maybeSingle();
+    // Helper: query com timeout (evita "timeout 5s" travado sem resposta)
+    var queryComTimeout = function(promessa, ms, label) {
+      return Promise.race([
+        promessa,
+        new Promise(function(_, reject) {
+          setTimeout(function() { reject(new Error(label + ' timeout após ' + ms + 'ms')); }, ms);
+        })
+      ]);
+    };
+
+    // Buscar tenant com timeout de 8s + 3 tentativas
+    var utRes = null;
+    for (var tentativa = 1; tentativa <= 3; tentativa++) {
+      try {
+        utRes = await queryComTimeout(
+          _sb.from('user_tenants')
+            .select('tenant_id, role')
+            .eq('user_id', _sbUserId)
+            .maybeSingle(),
+          8000,
+          'user_tenants tentativa ' + tentativa
+        );
+        if (!utRes.error) break;
+        console.warn('[GBR] user_tenants tentativa ' + tentativa + ' erro:', utRes.error.message);
+      } catch(eTimeout) {
+        console.warn('[GBR] ' + eTimeout.message);
+        if (tentativa === 3) {
+          showLoginMsg('⚠️ Conexão lenta com o banco. Verifique as políticas RLS no Supabase (execute GBR_SQL_CORRECOES.sql) e tente novamente.','erro');
+          return;
+        }
+        await new Promise(function(r){ setTimeout(r, 2000); }); // aguarda 2s antes de retry
+      }
     }
-    if (!utRes.data) {
-      showLoginMsg('Usuário sem estética vinculada. Contate o administrador.','erro'); return;
+    if (!utRes || utRes.error || !utRes.data) {
+      var errMsg = utRes && utRes.error ? utRes.error.message : 'não encontrado';
+      if (errMsg.includes('42501') || errMsg.includes('permission') || errMsg.includes('policy')) {
+        showLoginMsg('⚠️ Erro de permissão (RLS). Execute o SQL de correção no Supabase e tente novamente.','erro');
+      } else {
+        showLoginMsg('Usuário sem estética vinculada. Contate o administrador.\n(Detalhe: ' + errMsg + ')','erro');
+      }
+      return;
     }
     _sbTenantId = utRes.data.tenant_id;
     var tenantObj = await _sbCarregarTudo(_sbTenantId);
@@ -3871,27 +3985,41 @@ function editarServico(id){
   openModal('modalServico');
 }
 
-function salvarServico(){
+async function salvarServico(){
   const id=document.getElementById('servicoId').value;
   const nome=document.getElementById('s_nome').value.trim();
   const tempo=parseInt(document.getElementById('s_tempo').value)||0;
   const valor=parseFloat(document.getElementById('s_valor').value)||0;
   if(!nome||!tempo||!valor){toast('Preencha nome, tempo e valor','error');return;}
-  const dados={nome,descricao:document.getElementById('s_descricao').value.trim(),tempo_estimado_min:tempo,preco_base:valor,pontos_fidelidade:parseInt(document.getElementById('s_pontos').value)||0,valor_km:parseFloat(document.getElementById('s_valorKm').value)||0,leva_traz:document.getElementById('s_levaTraz').checked};
+  const dados={nome,descricao:document.getElementById('s_descricao').value.trim(),tempo_estimado_min:tempo,preco_base:valor,
+    pontos_fidelidade:parseInt(document.getElementById('s_pontos').value)||0,
+    valor_km:parseFloat(document.getElementById('s_valorKm').value)||0,
+    leva_traz:document.getElementById('s_levaTraz').checked};
   const sId=id||uid();
-  const sFull={id:sId,tenant_id:currentTenant?.id,...dados,ativo:true};
+  const sFull={id:sId,tenant_id:currentTenant?.id,...dados,ativo:true,updated_at:new Date().toISOString()};
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
-    _sbUpsert('servicos',sFull).then(function(saved){
+    _gbrAtualizarIndicadorSync('saving','Salvando serviço...');
+    const saved=await _sbUpsert('servicos',sFull);
+    if(saved){
       const i=DATA.servicos.findIndex(s=>s.id===sId);
-      if(saved){if(i>=0)DATA.servicos[i]=saved;else DATA.servicos.push(saved);}
-      else{if(i>=0)Object.assign(DATA.servicos[i],sFull);else DATA.servicos.push(sFull);salvarDados();}
-    });
+      if(i>=0)DATA.servicos[i]=saved;else DATA.servicos.push(saved);
+      _gbrAtualizarIndicadorSync('ok','Salvo na nuvem ✓');
+    } else {
+      // Fallback local se Supabase falhar
+      const i=DATA.servicos.findIndex(s=>s.id===sId);
+      if(i>=0)Object.assign(DATA.servicos[i],sFull);else DATA.servicos.push(sFull);
+      try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){}
+      _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
+    }
   } else {
     const i=DATA.servicos.findIndex(s=>s.id===sId);
     if(i>=0)Object.assign(DATA.servicos[i],sFull);else DATA.servicos.push(sFull);
-    salvarDados();
+    salvarDados(true);
+    toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   closeModal('modalServico');renderServicos();toast('Serviço salvo!');
+  if(typeof logAuditoria==='function')logAuditoria(id?'Editou Serviço':'Novo Serviço',nome);
 }
 
 function excluirServico(id){if(!confirm('Excluir serviço?'))return;const i=DATA.servicos.findIndex(s=>s.id===id);if(i>=0){DATA.servicos[i].ativo=false;if(_sb&&_sbTenantId)_sbSoftDelete('servicos',id);else salvarDados();renderServicos();toast('Serviço removido');}}
@@ -3953,7 +4081,7 @@ function prevProduto(){
   }else prev.style.display='none';
 }
 
-function salvarProduto(){
+async function salvarProduto(){
   const id=document.getElementById('produtoId').value;
   const nome=document.getElementById('p_nome').value.trim();
   if(!nome){toast('Nome obrigatório','error');return;}
@@ -3979,19 +4107,29 @@ function salvarProduto(){
     estoque_minimo: qtdMin,        // estoque mínimo para alerta
   };
   const pId=id||uid();
-  const pFull={id:pId,tenant_id:currentTenant?.id,...dados,ativo:true};
+  const pFull={id:pId,tenant_id:currentTenant?.id,...dados,ativo:true,updated_at:new Date().toISOString()};
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
-    _sbUpsert('produtos',pFull).then(function(saved){
+    _gbrAtualizarIndicadorSync('saving','Salvando produto...');
+    const saved=await _sbUpsert('produtos',pFull);
+    if(saved){
       const i=DATA.produtos.findIndex(p=>p.id===pId);
-      if(saved){if(i>=0)DATA.produtos[i]=saved;else DATA.produtos.push(saved);}
-      else{if(i>=0)Object.assign(DATA.produtos[i],pFull);else DATA.produtos.push(pFull);salvarDados();}
-    });
+      if(i>=0)DATA.produtos[i]=saved;else DATA.produtos.push(saved);
+      _gbrAtualizarIndicadorSync('ok','Salvo na nuvem ✓');
+    } else {
+      const i=DATA.produtos.findIndex(p=>p.id===pId);
+      if(i>=0)Object.assign(DATA.produtos[i],pFull);else DATA.produtos.push(pFull);
+      try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}
+      _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
+    }
   } else {
     const i=DATA.produtos.findIndex(p=>p.id===pId);
     if(i>=0)Object.assign(DATA.produtos[i],pFull);else DATA.produtos.push(pFull);
-    salvarDados();
+    salvarDados(true);
+    toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   closeModal('modalProduto');renderEstoque();renderDashboard();toast('Produto salvo!');
+  if(typeof logAuditoria==='function')logAuditoria(id?'Editou Produto':'Novo Produto',nome);
 }
 
 function abrirMovEstoque(pid){
@@ -4004,7 +4142,7 @@ function abrirMovEstoque(pid){
   openModal('modalMovEstoque');
 }
 
-function salvarMovEstoque(){
+async function salvarMovEstoque(){
   const pid=document.getElementById('movProdId').value;
   const tipo=document.getElementById('movTipo').value;
   const qtd=parseFloat(document.getElementById('movQtd').value)||0;
@@ -4014,16 +4152,28 @@ function salvarMovEstoque(){
     if(tipo==='entrada')DATA.produtos[i].quantidade_atual+=qtd;
     else DATA.produtos[i].quantidade_atual=Math.max(0,DATA.produtos[i].quantidade_atual-qtd);
     DATA.produtos[i].quantidade_embalagens=DATA.produtos[i].quantidade_atual/(DATA.produtos[i].quantidade_por_embalagem||1);
-    // Persistir estoque atualizado
+    DATA.produtos[i].saldo_atual=DATA.produtos[i].quantidade_atual;
+    // ── GRAVAÇÃO DIRETA NA NUVEM ──
     if(_sb&&_sbTenantId){
-      _sbUpsert('produtos',{id:pid,tenant_id:currentTenant?.id,
+      _gbrAtualizarIndicadorSync('saving','Atualizando estoque...');
+      // 1. Atualizar saldo do produto
+      const savedProd=await _sbUpsert('produtos',{
+        id:pid, tenant_id:currentTenant?.id,
         quantidade_atual:DATA.produtos[i].quantidade_atual,
-        quantidade_embalagens:DATA.produtos[i].quantidade_embalagens});
-      _sb.from('movimentacoes_estoque').insert({
-        id:uid(),tenant_id:currentTenant?.id,produto_id:pid,tipo,quantidade:qtd,
-        motivo:document.getElementById('movMotivo').value
-      }).then(function(){});
-    } else { salvarDados(); }
+        quantidade_embalagens:DATA.produtos[i].quantidade_embalagens,
+        saldo_atual:DATA.produtos[i].quantidade_atual,
+        updated_at:new Date().toISOString()
+      });
+      // 2. Registrar movimentação de estoque
+      const movEst={id:uid(),tenant_id:currentTenant?.id,produto_id:pid,tipo,quantidade:qtd,
+        motivo:document.getElementById('movMotivo').value,created_at:new Date().toISOString()};
+      await _sb.from('movimentacoes_estoque').insert(movEst);
+      if(savedProd){_gbrAtualizarIndicadorSync('ok','Estoque atualizado ✓');}
+      else{try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+    } else {
+      salvarDados(true);
+      toast('⚠️ Sem conexão — salvo localmente','warn');
+    }
   }
   closeModal('modalMovEstoque');renderEstoque();renderDashboard();toast('Estoque atualizado!');
 }
@@ -4286,29 +4436,49 @@ function abrirModalRegra(editId){
 }
 function editarRegra(id){abrirModalRegra(id);}
 
-function salvarRegra(){
+async function salvarRegra(){
   const nome=document.getElementById('r_nome').value.trim();
   const pontos=parseInt(document.getElementById('r_pontos').value)||0;
   if(!nome||!pontos){toast('Preencha nome e pontos','error');return;}
   const id=document.getElementById('regraId').value;
-  const dados={nome,descricao:document.getElementById('r_desc').value,pontos,tipo:document.getElementById('r_tipo').value,valor:document.getElementById('r_valor').value,ativo:true};
+  const dados={nome,descricao:document.getElementById('r_desc').value,pontos,
+    tipo:document.getElementById('r_tipo').value,valor:document.getElementById('r_valor').value,ativo:true};
   const rId=id||uid();
-  const rFull={id:rId,tenant_id:currentTenant?.id,...dados};
+  const rFull={id:rId,tenant_id:currentTenant?.id,...dados,updated_at:new Date().toISOString()};
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
-    _sbUpsert('regras_fidelidade',rFull).then(function(saved){
+    _gbrAtualizarIndicadorSync('saving','Salvando regra...');
+    const saved=await _sbUpsert('regras_fidelidade',rFull);
+    if(saved){
       const i=DATA.regras_fidelidade.findIndex(r=>r.id===rId);
-      if(saved){if(i>=0)DATA.regras_fidelidade[i]=saved;else DATA.regras_fidelidade.push(saved);}
-      else{if(i>=0)Object.assign(DATA.regras_fidelidade[i],rFull);else DATA.regras_fidelidade.push(rFull);salvarDados();}
-    });
+      if(i>=0)DATA.regras_fidelidade[i]=saved;else DATA.regras_fidelidade.push(saved);
+      _gbrAtualizarIndicadorSync('ok','Salvo na nuvem ✓');
+    } else {
+      const i=DATA.regras_fidelidade.findIndex(r=>r.id===rId);
+      if(i>=0)Object.assign(DATA.regras_fidelidade[i],rFull);else DATA.regras_fidelidade.push(rFull);
+      try{localStorage.setItem('gbr_regras_fidelidade',JSON.stringify(DATA.regras_fidelidade));}catch(e){}
+      _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
+    }
   } else {
     const i=DATA.regras_fidelidade.findIndex(r=>r.id===rId);
     if(i>=0)Object.assign(DATA.regras_fidelidade[i],rFull);else DATA.regras_fidelidade.push(rFull);
-    salvarDados();
+    salvarDados(true);
+    toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   closeModal('modalRegra');renderFidelidade();atualizarFidAlerts();toast('Regra salva!');
 }
 
-function excluirRegra(id){if(!confirm('Excluir esta regra?'))return;const i=DATA.regras_fidelidade.findIndex(r=>r.id===id);if(i>=0){DATA.regras_fidelidade.splice(i,1);salvarDados();renderFidelidade();}}
+async function excluirRegra(id){
+  if(!confirm('Excluir esta regra?'))return;
+  const i=DATA.regras_fidelidade.findIndex(r=>r.id===id);
+  if(i>=0){
+    DATA.regras_fidelidade.splice(i,1);
+    if(_sb&&_sbTenantId){
+      await _sb.from('regras_fidelidade').delete().eq('id',id);
+    } else { salvarDados(true); }
+    renderFidelidade();
+  }
+}
 
 function abrirResgate(clienteId){
   const c=DATA.clientes.find(x=>x.id===clienteId);if(!c)return;
@@ -4320,15 +4490,29 @@ function abrirResgate(clienteId){
   openModal('modalResgate');
 }
 
-function confirmarResgate(){
+async function confirmarResgate(){
   if(!resgateAtual)return;
   const i=DATA.clientes.findIndex(c=>c.id===resgateAtual.clienteId);
   if(i>=0){
     const pontosZerados=DATA.clientes[i].pontos_fidelidade;
     DATA.clientes[i].pontos_fidelidade=0;
-    DATA.resgates_fidelidade.push({id:uid(),tenant_id:currentTenant?.id,cliente_id:resgateAtual.clienteId,regra_id:resgateAtual.regra.id,pontos_zerados:pontosZerados,observacao:document.getElementById('resgateObs').value,created_at:new Date().toISOString()});
+    const resgate={id:uid(),tenant_id:currentTenant?.id,cliente_id:resgateAtual.clienteId,
+      regra_id:resgateAtual.regra.id,pontos_zerados:pontosZerados,
+      observacao:document.getElementById('resgateObs').value,created_at:new Date().toISOString()};
+    DATA.resgates_fidelidade.push(resgate);
+    // ── GRAVAÇÃO DIRETA NA NUVEM ──
+    if(_sb&&_sbTenantId){
+      _gbrAtualizarIndicadorSync('saving','Registrando resgate...');
+      // Atualizar pontos do cliente
+      await _sbUpsert('clientes',{id:resgateAtual.clienteId,tenant_id:currentTenant?.id,pontos_fidelidade:0,updated_at:new Date().toISOString()});
+      // Salvar registro de resgate
+      await _sb.from('resgates_fidelidade').insert(resgate).catch(function(){});
+      _gbrAtualizarIndicadorSync('ok','Resgate salvo na nuvem ✓');
+    } else {
+      salvarDados(true);
+    }
   }
-  salvarDados();closeModal('modalResgate');renderFidelidade();atualizarFidAlerts();
+  closeModal('modalResgate');renderFidelidade();atualizarFidAlerts();
   toast('Resgate realizado! Pontos zerados e contagem reiniciada.','success');
 }
 
@@ -4388,15 +4572,26 @@ function calcAbertura(){
   const total=['ac_din','ac_pix','ac_cred','ac_deb'].reduce((s,id)=>s+(+document.getElementById(id).value||0),0);
   document.getElementById('acTotal').textContent=fmtMoney(total);
 }
-function abrirCaixa(){
+async function abrirCaixa(){
   const contagem={dinheiro:+document.getElementById('ac_din').value||0,pix:+document.getElementById('ac_pix').value||0,credito:+document.getElementById('ac_cred').value||0,debito:+document.getElementById('ac_deb').value||0};
   const total=Object.values(contagem).reduce((a,b)=>a+b,0);
   currentCaixa={id:uid(),tenant_id:currentTenant?.id,saldo_inicial:total,contagem_abertura:contagem,total_esperado:total,status:'aberto',aberto_em:new Date().toISOString()};
   DATA.caixas.push(currentCaixa);
-  salvarDados();
-  // FIX SYNC: salvar caixa no Supabase
-  if(_sb && _sbTenantId){
-    _sbUpsert('caixas', currentCaixa).catch(function(e){ console.warn('[GBR] caixa upsert:', e.message); });
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Abrindo caixa...');
+    const saved=await _sbUpsert('caixas',currentCaixa);
+    if(saved){
+      const i=DATA.caixas.findIndex(c=>c.id===currentCaixa.id);
+      if(i>=0)DATA.caixas[i]=saved;
+      _gbrAtualizarIndicadorSync('ok','Caixa aberto na nuvem ✓');
+    } else {
+      try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}
+      _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
+    }
+  } else {
+    salvarDados(true);
+    toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   closeModal('modalAbrirCaixa');renderCaixa();toast('Caixa aberto com '+fmtMoney(total)+'!');
 }
@@ -4425,7 +4620,7 @@ function calcFechamento(){
   difEl.style.color=Math.abs(dif)<0.01?'var(--green)':dif>0?'var(--accent)':'var(--red)';
   difEl.dataset.real=real;
 }
-function fecharCaixa(){
+async function fecharCaixa(){
   if(!currentCaixa)return;
   const _fcReal2=+document.getElementById('fcDif').dataset.real||0;
   const _fcEsp2=+document.getElementById('fcEsperado').dataset.val||0;
@@ -4447,14 +4642,19 @@ function fecharCaixa(){
     categoria:'Fechamento de Caixa', descricao:'Caixa fechado — '+new Date().toLocaleDateString('pt-BR'),
     valor:real, data:hoje, forma_pagamento:'misto', created_at:new Date().toISOString()
   });
-  // FIX SYNC: salvar fechamento do caixa no Supabase
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb && _sbTenantId && DATA.caixas[i]){
-    _sbUpsert('caixas', DATA.caixas[i]).catch(function(e){ console.warn('[GBR] fecharCaixa upsert:', e.message); });
-    // Salvar movimentação de fechamento no financeiro
+    _gbrAtualizarIndicadorSync('saving','Fechando caixa...');
+    // 1. Atualizar caixa como fechado
+    const savedCx=await _sbUpsert('caixas', DATA.caixas[i]);
+    // 2. Gravar movimentação financeira de fechamento
     var movFin = DATA.movimentacoes_fin[DATA.movimentacoes_fin.length-1];
-    if(movFin) _sbUpsert('movimentacoes_financeiras', movFin).catch(function(){});
+    if(movFin) await _sbUpsert('movimentacoes_financeiras', movFin);
+    if(savedCx){_gbrAtualizarIndicadorSync('ok','Caixa fechado na nuvem ✓');}
+    else{try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
   }
-  currentCaixa=null;salvarDados();closeModal('modalFecharCaixa');renderCaixa();atualizarFidAlerts();toast('Caixa fechado e lançado no financeiro!');
+  currentCaixa=null;try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}
+  closeModal('modalFecharCaixa');renderCaixa();atualizarFidAlerts();toast('Caixa fechado e lançado no financeiro!');
 }
 
 // Movimentação manual
@@ -4466,19 +4666,26 @@ function abrirMovCaixa(tipo){
   document.getElementById('movCaixaDesc').value='';
   openModal('modalMovCaixa');
 }
-function confirmarMovCaixa(){
+async function confirmarMovCaixa(){
   const tipo=document.getElementById('movCaixaTipo').value;
   const val=parseFloat(document.getElementById('movCaixaVal').value)||0;
   const desc=document.getElementById('movCaixaDesc').value.trim();
   if(!val||val<=0){toast('Informe o valor','error');return;}
   if(!desc){toast('Informe a descrição','error');return;}
-  var mov = {id:uid(),tenant_id:currentTenant?.id,caixa_id:currentCaixa.id,tipo,categoria:'manual',valor:val,forma_pagamento:document.getElementById('movCaixaPag').value,descricao:desc,created_at:new Date().toISOString()};
+  var mov = {id:uid(),tenant_id:currentTenant?.id,caixa_id:currentCaixa.id,tipo,categoria:'manual',valor:val,
+    forma_pagamento:document.getElementById('movCaixaPag').value,descricao:desc,created_at:new Date().toISOString()};
   DATA.movimentacoes.push(mov);
-  // FIX SYNC: salvar movimentação no Supabase
-  if(_sb && _sbTenantId){
-    _sb.from('movimentacoes').upsert(mov, {onConflict:'id'}).catch(function(e){ console.warn('[GBR] mov upsert:', e.message); });
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Registrando...');
+    const saved=await _sbUpsert('movimentacoes',mov);
+    if(saved){_gbrAtualizarIndicadorSync('ok','Movimentação salva ✓');}
+    else{try{localStorage.setItem('gbr_movimentacoes',JSON.stringify(DATA.movimentacoes));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+  } else {
+    salvarDados(true);
+    toast('⚠️ Sem conexão — salvo localmente','warn');
   }
-  salvarDados();closeModal('modalMovCaixa');renderCaixa();toast('Movimentação registrada!');
+  closeModal('modalMovCaixa');renderCaixa();toast('Movimentação registrada!');
 }
 
 // ===== CHECKLIST =====
@@ -4614,15 +4821,26 @@ function confirmarAssin(){
   toast('Assinatura confirmada!');
 }
 
-function salvarChk(st){
+async function salvarChk(st){
   const aid=document.getElementById('chkAgend').value;
   if(!aid){toast('Selecione o agendamento','error');return;}
   if(st==='aprovado'&&!assinOk){toast('É necessário confirmar a assinatura do cliente para aprovar','warn');return;}
-  const chk={id:uid(),tenant_id:currentTenant?.id,agendamento_id:aid,itens:chkItens,fotos:fotosChk,assinatura:assinData,observacao:document.getElementById('chkObs').value,status:st,aprovado_em:st==='aprovado'?new Date().toISOString():null,created_at:new Date().toISOString()};
-  // FIX SYNC: salvar checklist no Supabase
-  if(_sb && _sbTenantId){ _sbUpsert('checklists', chk).catch(function(e){ console.warn('[GBR] checklist upsert:', e.message); }); }
-  DATA.checklists.push(chk);salvarDados();closeModal('modalChecklist');renderChecklists();
-  toast('Checklist '+( st==='aprovado'?'aprovado':'salvo')+'!');
+  const chk={id:uid(),tenant_id:currentTenant?.id,agendamento_id:aid,itens:chkItens,fotos:fotosChk,assinatura:assinData,
+    observacao:document.getElementById('chkObs').value,status:st,
+    aprovado_em:st==='aprovado'?new Date().toISOString():null,created_at:new Date().toISOString()};
+  DATA.checklists.push(chk);
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Salvando checklist...');
+    const saved=await _sbUpsert('checklists',chk);
+    if(saved){_gbrAtualizarIndicadorSync('ok','Checklist salvo na nuvem ✓');}
+    else{try{localStorage.setItem('gbr_checklists',JSON.stringify(DATA.checklists));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+  } else {
+    salvarDados(true);
+    toast('⚠️ Sem conexão — salvo localmente','warn');
+  }
+  closeModal('modalChecklist');renderChecklists();
+  toast('Checklist '+(st==='aprovado'?'aprovado':'salvo')+'!');
 }
 
 function verChk(id){
@@ -4696,19 +4914,28 @@ function alterarSenhaConfig(){
   toast('Senha alterada com sucesso!');
 }
 
-function salvarConfigEmpresa(){
+async function salvarConfigEmpresa(){
   if(!currentTenant)return;
   const i=DATA.tenants.findIndex(t=>t.id===currentTenant.id);
   if(i>=0){DATA.tenants[i].config_empresa={nome:document.getElementById('cfgEmpresaNome').value,cnpj:document.getElementById('cfgCnpj').value,telefone:document.getElementById('cfgTelefone').value,email:document.getElementById('cfgEmail').value};}
-  // Salva CEP e valor KM nas configurações do tenant
   const tid=currentTenant.id;
   if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   const cepEmp=(document.getElementById('cfgCepEmpresa')?.value||'').replace(/\D/g,'');
   const vkm=parseFloat(document.getElementById('cfgValorKmLT')?.value)||0;
   DATA.configuracoes[tid].cep_empresa=cepEmp;
   DATA.configuracoes[tid].valor_km_leva_traz=vkm;
+  // ── GRAVAÇÃO DIRETA NA NUVEM ──
+  if(_sb&&_sbTenantId){
+    _gbrAtualizarIndicadorSync('saving','Salvando configurações...');
+    await _sb.from('tenants').update({
+      config_empresa: DATA.tenants[i]?.config_empresa,
+      config: DATA.configuracoes[tid],
+      atualizado_em: new Date().toISOString()
+    }).eq('id',tid);
+    _gbrAtualizarIndicadorSync('ok','Configurações salvas na nuvem ✓');
+  } else { salvarDados(true); }
   if(typeof logAuditoria==='function')logAuditoria('Salvou Configurações da Empresa','CEP e valor/km atualizados');
-  salvarDados();toast('Dados da empresa salvos!');
+  toast('Dados da empresa salvos na nuvem!','success');
 }
 
 function salvarRegraDesconto(){toast('Regras de desconto salvas!');}
