@@ -4959,18 +4959,20 @@ function imprimirChk(id){
 }
 
 // ===== CONFIG =====
-function alterarSenhaConfig(){
-  const atual=document.getElementById('cfgSenhaAtual').value;
+async function alterarSenhaConfig(){
   const nova=document.getElementById('cfgNovaSenha').value;
   const conf=document.getElementById('cfgConfirmaSenha').value;
   if(!currentUser)return;
-  if(atual!==currentUser.password){toast('Senha atual incorreta','error');return;}
   if(nova.length<6){toast('Mínimo 6 caracteres','error');return;}
   if(nova!==conf){toast('Senhas não conferem','error');return;}
-  const i=DATA.users.findIndex(u=>u.id===currentUser.id);
-  if(i>=0){DATA.users[i].password=nova;try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}currentUser.password=nova;}
-  ['cfgSenhaAtual','cfgNovaSenha','cfgConfirmaSenha'].forEach(id=>document.getElementById(id).value='');
-  toast('Senha alterada com sucesso!');
+  if(_sb&&_sbReady){
+    var r=await _sb.auth.updateUser({password:nova});
+    if(r.error){toast('Erro: '+r.error.message,'error');return;}
+  }
+  ['cfgSenhaAtual','cfgNovaSenha','cfgConfirmaSenha'].forEach(function(id){
+    var el=document.getElementById(id);if(el)el.value='';
+  });
+  toast('✅ Senha alterada com sucesso!');
 }
 
 async function salvarConfigEmpresa(){
@@ -5359,54 +5361,14 @@ function editarUsuario(id){
   openModal('modalUsuario');
 }
 
-function salvarUsuario(){
-  const id=document.getElementById('userId').value;
-  const nome=document.getElementById('u_nome').value.trim();
-  const email=document.getElementById('u_email').value.trim().toLowerCase();
-  const role=document.getElementById('u_role').value;
-  if(!nome||!email){toast('Preencha nome e email','error');return;}
-  if(!email.includes('@')){toast('Email inválido','error');return;}
-  if(id){
-    const i=DATA.users.findIndex(u=>u.id===id);
-    if(i>=0){DATA.users[i].nome=nome;DATA.users[i].email=email;DATA.users[i].role=role;}
-    if(typeof logAuditoria==='function')logAuditoria('Console: Editou Usuário',nome+' ('+role+')');
-  }else{
-    if(DATA.users.find(u=>u.email===email)){toast('Email já cadastrado','error');return;}
-    const _tmpPwd2=CONFIG.genTempPwd();
-    DATA.users.push({id:uid(),tenant_id:null,email,nome,role,password:_tmpPwd2,must_change_password:true,ativo:true,created_at:new Date().toISOString()});
-    if(typeof logAuditoria==='function')logAuditoria('Console: Criou Usuário',nome+' ('+role+')');
-    setTimeout(()=>{alert('✅ Usuário criado!\n\nEmail: '+email+'\nSenha temporária: '+_tmpPwd2+'\n\n⚠ O usuário deverá trocar a senha no primeiro acesso.');},300);
-  }
-  // Sync usuario no Supabase via global_settings
-  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
-  closeModal('modalUsuario');toast('Usuário salvo!');GBR_API._notifyConsole('users_changed');
-}
+// salvarUsuario() → redireciona para o fluxo correto (user_tenants via Supabase)
+function salvarUsuario(){ salvarUsuarioAdmin(); }
 
-function resetarSenha(id){
-  const u=DATA.users.find(x=>x.id===id);if(!u)return;
-  if(!confirm('Gerar nova senha temporária para "'+u.nome+'"?'))return;
-  const nova=CONFIG.genTempPwd();
-  const i=DATA.users.findIndex(x=>x.id===id);
-  if(i>=0){
-    DATA.users[i].password=nova;
-    DATA.users[i].must_change_password=true;
-    if(typeof logAuditoria==='function')logAuditoria('Console: Reset de Senha',u.nome);
-    if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){};GBR_API._notifyConsole('users_changed');
-    alert('🔑 Nova senha para '+u.nome+':\n\n'+nova+'\n\nO usuário deverá trocar no próximo login.');
-  }
-}
+// resetarSenha() → usa resetSenhaAdmin() (Supabase Auth)
+function resetarSenha(id){ resetSenhaAdmin(id); }
 
-function toggleUsuario(id){
-  const u=DATA.users.find(x=>x.id===id);if(!u)return;
-  const i=DATA.users.findIndex(x=>x.id===id);
-  if(i>=0){
-    DATA.users[i].ativo=!DATA.users[i].ativo;
-    if(typeof logAuditoria==='function')logAuditoria('Console: '+(DATA.users[i].ativo?'Ativou':'Desativou')+' Usuário',u.nome);
-    if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){};GBR_API._notifyConsole('users_changed');
-    toast(DATA.users[i].ativo?'Usuário ativado':'Usuário desativado');
-  }
-}
+// toggleUsuario() → usa toggleUserAdmin()
+function toggleUsuario(id){ toggleUserAdmin(id); }
 
 // Fechar modais ao clicar fora
 document.querySelectorAll('.modal-overlay').forEach(o=>{o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');});});
@@ -6349,62 +6311,92 @@ async function _sbCarregarColaboradores() {
   } catch(e) { console.warn('[GBR] _sbCarregarColaboradores:', e.message); }
 }
 
-function renderAdminAcessos(){
+async function renderAdminAcessos(){
   if(!currentTenant)return;
-  // FIX: carregar do Supabase em tempo real ao invés de DATA.users local
-  // DATA.users só tem o usuário logado; a lista real vem de _sbCarregarColaboradores
-  const users=DATA.users.filter(u=>(u.tenant_id===currentTenant.id||u.tenant_id===_sbTenantId)&&u.role!=='superadmin');
   const tb=document.getElementById('adminUsersTbody');
   if(!tb)return;
-  if(!users.length){tb.innerHTML='<tr><td colspan="6" class="empty">Nenhum usuário cadastrado</td></tr>';return;}
+  tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px"><span class="sp"></span> Carregando colaboradores...</td></tr>';
 
-  // Nova hierarquia: woner > admin > operador (com legado mapeado)
-  const roleLabel={
-    woner:'👑 Woner', owner:'👑 Woner',
-    admin:'🔧 Admin', gerente:'🔧 Admin',
-    operador:'👤 Operador'
-  };
-  const roleColor={
-    woner:'badge-purple', owner:'badge-purple',
-    admin:'badge-blue', gerente:'badge-blue',
-    operador:'badge-gray'
-  };
+  // ── FONTE DE VERDADE: user_tenants no Supabase ──
+  var colaboradores = [];
+  if(_sb && _sbTenantId){
+    try {
+      var r = await _sb.from('user_tenants')
+        .select('user_id, role, email_cache, nome, ativo, criado_em')
+        .filter('tenant_id::text','eq',String(_sbTenantId));
+      if(!r.error && r.data){
+        colaboradores = r.data.map(function(ut){
+          return {
+            id: ut.user_id,
+            email: ut.email_cache || '',
+            nome: ut.nome || ut.email_cache || 'Usuário',
+            role: ({woner:'woner',owner:'woner',dono:'woner',admin:'admin',gerente:'admin',supervisor:'admin',operador:'operador'})[ut.role] || ut.role,
+            ativo: ut.ativo !== false,
+            created_at: ut.criado_em || '',
+            _sbUserId: ut.user_id
+          };
+        });
+        // Atualizar DATA.users com dados frescos do banco
+        colaboradores.forEach(function(u){
+          var idx = DATA.users.findIndex(function(x){ return x._sbUserId===u.id || x.email===u.email; });
+          if(idx>=0) Object.assign(DATA.users[idx], u, {tenant_id:_sbTenantId});
+          else DATA.users.push(Object.assign({},u,{tenant_id:_sbTenantId,_sbFromSB:true}));
+        });
+      }
+    } catch(e){ console.warn('[GBR] renderAdminAcessos:', e.message); }
+  } else {
+    // Fallback local
+    colaboradores = DATA.users.filter(function(u){
+      return (u.tenant_id===currentTenant.id||u.tenant_id===_sbTenantId) && u.role!=='superadmin';
+    });
+  }
 
-  // Exibir contador de colaboradores vs limite do plano
+  if(!colaboradores.length){
+    tb.innerHTML='<tr><td colspan="6" class="empty">Nenhum colaborador cadastrado.<br><small>Clique em "+ Novo Usuário" para adicionar.</small></td></tr>';
+    renderPermGrid(); return;
+  }
+
+  const roleLabel={woner:'👑 Woner',owner:'👑 Woner',dono:'👑 Woner',admin:'🔧 Admin/Supervisor',gerente:'🔧 Admin/Supervisor',supervisor:'🔧 Admin/Supervisor',operador:'👤 Operador'};
+  const roleColor={woner:'badge-purple',owner:'badge-purple',dono:'badge-purple',admin:'badge-blue',gerente:'badge-blue',supervisor:'badge-blue',operador:'badge-gray'};
+
+  // Contador de colaboradores vs limite do plano
   const maxColab = window._gbrMaxColaboradores || null;
-  const totalAtivos = users.filter(u=>u.ativo && u.role!=='woner' && u.role!=='owner').length;
-  if (maxColab) {
-    const headerCard = tb.closest('.card');
-    let counterEl = document.getElementById('colabCounter');
-    if (!counterEl && headerCard) {
-      counterEl = document.createElement('div');
-      counterEl.id = 'colabCounter';
-      counterEl.style.cssText = 'font-size:11px;color:var(--text2);margin-bottom:10px;padding:6px 10px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)';
-      // FIX3: insertAdjacentElement evita NotFoundError
-      var ch = headerCard.querySelector(".card-header"); if(ch) ch.insertAdjacentElement("afterend", counterEl); else headerCard.appendChild(counterEl);
+  const totalAtivos = colaboradores.filter(function(u){return u.ativo && u.role!=='woner' && u.role!=='owner' && u.role!=='dono';}).length;
+  if(maxColab){
+    var headerCard=tb.closest('.card');
+    var counterEl=document.getElementById('colabCounter');
+    if(!counterEl&&headerCard){
+      counterEl=document.createElement('div');
+      counterEl.id='colabCounter';
+      counterEl.style.cssText='font-size:11px;color:var(--text2);margin-bottom:10px;padding:6px 10px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)';
+      var ch=headerCard.querySelector('.card-header');
+      if(ch)ch.insertAdjacentElement('afterend',counterEl);else headerCard.appendChild(counterEl);
     }
-    if (counterEl) {
-      const cor = totalAtivos >= maxColab ? 'var(--red)' : 'var(--green)';
-      counterEl.innerHTML = '👥 Colaboradores: <b style="color:'+cor+'">'+totalAtivos+'/'+maxColab+'</b> permitidos no plano <b>'+( window._gbrNomePlano||'atual')+'</b>';
+    if(counterEl){
+      var cor=totalAtivos>=maxColab?'var(--red)':'var(--green)';
+      counterEl.innerHTML='👥 Colaboradores: <b style="color:'+cor+'">'+totalAtivos+'/'+maxColab+'</b> no plano <b>'+(window._gbrNomePlano||'atual')+'</b>';
     }
   }
 
-  tb.innerHTML=users.map(u=>{
-    const sessao=(DATA._sessoes||[]).find(s=>s.userId===u.id);
-    const online=sessao&&(new Date()-new Date(sessao.ultima_atividade))<300000;
-    const dev=sessao?(sessao.dispositivo==='mobile'?'📱 Mobile':'🖥️ Desktop'):'—';
-    const onlineBadge=sessao?`<span class="badge ${online?'badge-green':'badge-gray'}"><span class="${online?'online-dot':'offline-dot'}"></span>${online?'Online':'Offline'}</span>`:'<span class="badge badge-gray">Sem sessão</span>';
-    const lbl = roleLabel[u.role] || u.role;
-    const cor = roleColor[u.role] || 'badge-gray';
-    return'<tr><td><div class="td-name">'+u.nome+'</div><div class="td-sub">'+u.email+'</div></td>'+
+  tb.innerHTML=colaboradores.map(function(u){
+    var sessao=(DATA._sessoes||[]).find(function(s){return s.userId===u.id||s.userId===u._sbUserId;});
+    var online=sessao&&(new Date()-new Date(sessao.ultima_atividade))<300000;
+    var dev=sessao?(sessao.dispositivo==='mobile'?'📱 Mobile':'🖥️ Desktop'):'—';
+    var onlineBadge=sessao?'<span class="badge '+(online?'badge-green':'badge-gray')+'"><span class="'+(online?'online-dot':'offline-dot')+'"></span>'+(online?'Online':'Offline')+'</span>':'<span class="badge badge-gray">Sem sessão</span>';
+    var lbl=roleLabel[u.role]||u.role;
+    var cor=roleColor[u.role]||'badge-gray';
+    return '<tr><td><div class="td-name">'+u.nome+'</div><div class="td-sub">'+u.email+'</div></td>'+
       '<td><span class="badge '+cor+'">'+lbl+'</span></td>'+
       '<td><span style="font-size:11px;color:var(--text2)">'+(sessao?fmtDateTime(sessao.ultima_atividade):'Nunca')+'</span></td>'+
       '<td><span style="font-size:12px">'+dev+'</span></td>'+
       '<td>'+onlineBadge+'</td>'+
-      '<td><div class="actions-row"><button class="btn btn-secondary btn-xs" onclick="editarUsuarioAdmin(\''+u.id+'\')">✏ Editar</button><button class="btn btn-secondary btn-xs" onclick="resetSenhaAdmin(\''+u.id+'\')">🔑 Reset</button><button class="btn btn-danger btn-xs" onclick="toggleUserAdmin(\''+u.id+'\')">⏻</button></div></td></tr>';
+      '<td><div class="actions-row"><button class="btn btn-secondary btn-xs" onclick="editarUsuarioAdmin(\''+u.id+'\')">✏ Editar</button>'+
+      '<button class="btn btn-secondary btn-xs" onclick="resetSenhaAdmin(\''+u.id+'\')">🔑 Reset</button>'+
+      '<button class="btn btn-danger btn-xs" onclick="toggleUserAdmin(\''+u.id+'\')">⏻</button></div></td></tr>';
   }).join('');
   renderPermGrid();
 }
+
 function abrirModalUsuarioAdmin(){
   document.getElementById('uaId').value='';document.getElementById('uaModalTitle').textContent='Novo Usuário';
   document.getElementById('ua_nome').value='';document.getElementById('ua_email').value='';
@@ -6412,83 +6404,152 @@ function abrirModalUsuarioAdmin(){
   document.getElementById('ua_status').value='ativo';
   openModal('modalUsuarioAdmin');
 }
-function editarUsuarioAdmin(id){
-  const u=DATA.users.find(x=>x.id===id);if(!u)return;
-  document.getElementById('uaId').value=u.id;document.getElementById('uaModalTitle').textContent='Editar Usuário';
-  document.getElementById('ua_nome').value=u.nome;document.getElementById('ua_email').value=u.email;
-  document.getElementById('ua_role').value=u.role;document.getElementById('ua_senha').value='';
+function editarUsuarioAdmin(userId){
+  // userId é o Supabase Auth user_id
+  var u=DATA.users.find(function(x){return x._sbUserId===userId||x.id===userId;});
+  if(!u)return;
+  document.getElementById('uaId').value=userId; // guardar o auth user_id
+  document.getElementById('uaModalTitle').textContent='Editar Colaborador';
+  document.getElementById('ua_nome').value=u.nome;
+  document.getElementById('ua_email').value=u.email;
+  document.getElementById('ua_role').value=u.role;
+  document.getElementById('ua_senha').value='';
   document.getElementById('ua_status').value=u.ativo?'ativo':'inativo';
   openModal('modalUsuarioAdmin');
 }
-function salvarUsuarioAdmin(){
+async function salvarUsuarioAdmin(){
   const id=document.getElementById('uaId').value;
   const nome=document.getElementById('ua_nome').value.trim();
-  const email=document.getElementById('ua_email').value.trim();
+  const email=document.getElementById('ua_email').value.trim().toLowerCase();
   const role=document.getElementById('ua_role').value;
   const senha=document.getElementById('ua_senha').value.trim();
   const ativo=document.getElementById('ua_status').value==='ativo';
   if(!nome||!email){toast('Preencha nome e email','error');return;}
 
-  // ── Restrição: cliente não pode criar woner/owner ──
+  // Woner só pode ser criado/alterado pelo Console GBR
   if(role==='woner'||role==='owner'){
-    toast('⛔ O perfil Woner/Owner só pode ser criado pelo Console GBR.','error');
+    toast('⛔ O perfil Woner só pode ser definido pelo Console GBR.','error'); return;
+  }
+
+  await _gbrAguardarTenant();
+  if(!_sb||!_sbTenantId){toast('Sem conexão com o banco. Tente novamente.','error');return;}
+
+  var btn=document.querySelector('#modalUsuarioAdmin .btn-primary');
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+
+  try {
+    if(id){
+      // ── EDIÇÃO: atualizar role, nome e status em user_tenants ──
+      var userId = id; // id aqui é o user_id do Supabase Auth
+      var r = await _sb.from('user_tenants')
+        .update({role:role, nome:nome, ativo:ativo})
+        .eq('user_id::text', userId)
+        .eq('tenant_id::text', String(_sbTenantId));
+      if(r.error) throw new Error(r.error.message);
+      // Atualizar DATA.users local
+      var idx=DATA.users.findIndex(function(u){return u._sbUserId===userId||u.id===userId;});
+      if(idx>=0) Object.assign(DATA.users[idx],{nome,role,ativo});
+      logAuditoria('Editou Colaborador',nome+' — '+role);
+      toast('Colaborador atualizado!','success');
+    } else {
+      // ── NOVO USUÁRIO ──
+      // Verificar limite do plano
+      var maxColab=window._gbrMaxColaboradores||999;
+      var rCount=await _sb.from('user_tenants')
+        .select('user_id',{count:'exact'})
+        .filter('tenant_id::text','eq',String(_sbTenantId))
+        .neq('role','woner').neq('role','owner').eq('ativo',true);
+      var countAtual=(rCount.count||0);
+      if(countAtual>=maxColab){
+        toast('⛔ Limite de '+maxColab+' colaborador(es) atingido no plano.','error');
+        return;
+      }
+
+      if(!senha||senha.length<6){toast('Senha obrigatória (mínimo 6 caracteres)','error');return;}
+
+      // 1. Criar conta no Supabase Auth via signUp
+      var signUpRes = await _sb.auth.signUp({email:email, password:senha, options:{data:{nome:nome}}});
+      var newUserId = null;
+
+      if(signUpRes.error){
+        var errMsg = signUpRes.error.message||'';
+        if(errMsg.toLowerCase().includes('already registered')||errMsg.toLowerCase().includes('already been registered')){
+          // Usuário já existe no Auth — vincular ao tenant
+          toast('Email já cadastrado — vinculando ao tenant...','warn');
+          // Tentar via signIn para obter o user_id (sem revelar senha)
+          // Não conseguimos obter o user_id sem a service_role key
+          // Instruir o usuário a adicionar pelo Console
+          toast('⚠️ Email já existe. Peça ao suporte GBR para vincular via Console.','warn');
+          return;
+        }
+        throw new Error(errMsg);
+      }
+
+      newUserId = signUpRes.data&&signUpRes.data.user ? signUpRes.data.user.id : null;
+      if(!newUserId){ toast('Erro ao obter ID do usuário criado.','error'); return; }
+
+      // 2. Inserir em user_tenants
+      var utRes = await _sb.from('user_tenants').insert({
+        user_id: newUserId,
+        tenant_id: String(_sbTenantId),
+        role: role,
+        email_cache: email,
+        nome: nome,
+        ativo: true,
+        criado_em: new Date().toISOString()
+      });
+      if(utRes.error) throw new Error(utRes.error.message);
+
+      // 3. Atualizar DATA.users local
+      DATA.users.push({
+        id: newUserId, _sbUserId: newUserId,
+        tenant_id: _sbTenantId, email, nome, role,
+        ativo: true, _sbFromSB: true,
+        created_at: new Date().toISOString()
+      });
+
+      logAuditoria('Criou Colaborador',nome+' — '+role+' — '+email);
+      toast('✅ Colaborador criado! Um email de confirmação foi enviado para '+email,'success');
+    }
+  } catch(e){
+    console.error('[GBR] salvarUsuarioAdmin:', e.message);
+    toast('❌ Erro: '+e.message,'error');
     return;
+  } finally {
+    if(btn){btn.disabled=false;btn.textContent='Salvar';}
   }
 
-  if(id){
-    // Edição
-    const i=DATA.users.findIndex(u=>u.id===id);
-    if(i>=0){
-      if(senha)DATA.users[i].password=senha;
-      Object.assign(DATA.users[i],{nome,email,role,ativo});
-      logAuditoria('Editou Usuário',nome+' — Perfil: '+role);
-    }
-  }else{
-    // ── Correção 4B: Verificar limite de colaboradores do plano ──
-    const maxColab = window._gbrMaxColaboradores || 999;
-    const usuariosAtivos = DATA.users.filter(function(u){
-      return u.tenant_id === (currentTenant&&currentTenant.id)
-          && u.ativo
-          && u.role !== 'superadmin'
-          && u.role !== 'woner'
-          && u.role !== 'owner';
-    });
-    if(usuariosAtivos.length >= maxColab){
-      toast('⛔ Limite de '+maxColab+' colaborador(es) atingido no seu plano. Faça upgrade para adicionar mais.','error');
-      return;
-    }
-
-    if(DATA.users.find(u=>u.email===email)){toast('Email já cadastrado','error');return;}
-    const _tmpPwd3=senha||CONFIG.genTempPwd();
-    DATA.users.push({
-      id:uid(),tenant_id:currentTenant?.id,email,nome,role,
-      password:_tmpPwd3,must_change_password:!senha,
-      ativo:true,created_at:new Date().toISOString()
-    });
-    if(!senha)setTimeout(()=>alert('🔑 Usuário criado!\n\nEmail: '+email+'\nSenha temporária: '+_tmpPwd3+'\n\nO usuário deverá trocar a senha no primeiro acesso.'),300);
-    logAuditoria('Criou Usuário',nome+' — '+role);
-  }
-  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
-  closeModal('modalUsuarioAdmin');renderAdminAcessos();toast('Usuário salvo!');
+  closeModal('modalUsuarioAdmin');
+  // Recarregar lista do Supabase
+  await renderAdminAcessos();
 }
-function resetSenhaAdmin(id){
-  const u=DATA.users.find(x=>x.id===id);if(!u)return;
-  if(!confirm('Gerar senha temporária para "'+u.nome+'"?'))return;
-  const nova=CONFIG.genTempPwd();
-  const i=DATA.users.findIndex(x=>x.id===id);
-  if(i>=0){
-    DATA.users[i].password=nova;
-    DATA.users[i].must_change_password=true;
-    if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){};
-    logAuditoria('Resetou Senha',DATA.users[i].nome);
-    renderAdminAcessos();
-    alert('🔑 Senha gerada para '+u.nome+':\n\n'+nova+'\n\nO usuário deverá trocar no próximo acesso.');
-  }
+async function resetSenhaAdmin(userId){
+  var user=DATA.users.find(function(u){return u._sbUserId===userId||u.id===userId;});
+  if(!user)return;
+  if(!confirm('Resetar acesso de "'+user.nome+'"?'))return;
+  logAuditoria('Solicitou Reset de Senha',user.nome);
+  alert('🔑 Para resetar a senha de '+user.nome+':\n\n'+
+    '1. Peça ao usuário usar "Esqueci minha senha" na tela de login\n'+
+    'OU\n'+
+    '2. Acesse o Console GBR → Estéticas → Usuários → Reset');
 }
-function toggleUserAdmin(id){
-  const i=DATA.users.findIndex(u=>u.id===id);
-  if(i>=0){DATA.users[i].ativo=!DATA.users[i].ativo;logAuditoria(DATA.users[i].ativo?'Ativou':'Desativou'+' Usuário',DATA.users[i].nome);if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'users_'+_sbTenantId,value:DATA.users,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}renderAdminAcessos();toast(DATA.users[i].ativo?'Usuário ativado':'Usuário desativado');}
+async function toggleUserAdmin(userId){
+  var user=DATA.users.find(function(u){return u._sbUserId===userId||u.id===userId;});
+  if(!user)return;
+  if(user.role==='woner'||user.role==='owner'){toast('⛔ Não é possível desativar o Woner daqui.','error');return;}
+  var novoAtivo=!user.ativo;
+  if(!confirm((novoAtivo?'Ativar':'Desativar')+' o acesso de '+user.nome+'?'))return;
+  if(_sb&&_sbTenantId){
+    var r=await _sb.from('user_tenants').update({ativo:novoAtivo})
+      .filter('user_id::text','eq',String(userId))
+      .filter('tenant_id::text','eq',String(_sbTenantId));
+    if(r.error){toast('Erro: '+r.error.message,'error');return;}
+  }
+  var idx=DATA.users.findIndex(function(u){return u._sbUserId===userId||u.id===userId;});
+  if(idx>=0)DATA.users[idx].ativo=novoAtivo;
+  logAuditoria((novoAtivo?'Ativou':'Desativou')+' Colaborador',user.nome);
+  await renderAdminAcessos();
+  toast(user.nome+(novoAtivo?' ativado':' desativado'));
 }
 
 // Permissões
