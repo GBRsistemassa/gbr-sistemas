@@ -2288,14 +2288,16 @@ function _sbAtivarRealtime(tenantId) {
 
   console.log('[GBR RT] ' + (tabelas.length + 2) + ' subscriptions ativas.');
 
-  // Fallback: iniciar polling após 8s se os canais Realtime não subirem
-  // (acontece quando as tabelas não estão na publicação supabase_realtime)
+  // Fallback: iniciar polling APENAS se nenhum canal subir em 10s
+  // (tabelas não estão na publicação supabase_realtime — execute GBR_SQL_CORRECOES_v2.sql)
   setTimeout(function() {
-    if (!window._gbrPollTimer && canaisAtivos < (tabelas.length / 2)) {
-      console.warn('[GBR RT] Menos da metade dos canais ativos — ativando polling de fallback (30s)');
+    if (!window._gbrPollTimer && canaisAtivos === 0) {
+      console.warn('[GBR RT] Nenhum canal Realtime ativo — ativando polling (30s). Execute GBR_SQL_CORRECOES_v2.sql para corrigir.');
       _gbrAtivarPolling(tenantId);
+    } else if (canaisAtivos > 0) {
+      console.log('[GBR RT] ' + canaisAtivos + ' canais ativos — Realtime operacional, polling não necessário.');
     }
-  }, 8000);
+  }, 10000);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2308,7 +2310,7 @@ var _gbrLastPoll = 0;
 function _gbrAtivarPolling(tenantId) {
   if (window._gbrPollTimer) return; // já ativo
   console.log('[GBR POLL] Iniciando polling de fallback a cada 30s');
-  _gbrAtualizarIndicadorSync('saving', 'Polling (Realtime indisponível)');
+  _gbrAtualizarIndicadorSync('saving', 'Polling ativo (Realtime indisponível)');
   window._gbrPollTimer = setInterval(async function() {
     if (!_sbReady || !tenantId || !currentUser) return;
     var agora = Date.now();
@@ -2326,14 +2328,15 @@ function _gbrAtivarPolling(tenantId) {
       var atualizado = false;
       for (var i = 0; i < tabelas.length; i++) {
         var cfg = tabelas[i];
-        var r = await _sb.from(cfg[0]).select('*').filter('tenant_id::text','eq',tenantId).limit(500);
+        var r = await _sb.from(cfg[0]).select('*').filter('tenant_id::text','eq',String(tenantId)).limit(500);
         if (!r.error && r.data && r.data.length > 0) {
+          // SUBSTITUIR completamente (não merge) para evitar duplicatas
           var antes = JSON.stringify(DATA[cfg[1]]);
           DATA[cfg[1]] = r.data;
           if (JSON.stringify(DATA[cfg[1]]) !== antes) atualizado = true;
         }
       }
-      // Buscar notificações novas
+      // Notificações
       var rN = await _sb.from('notifications')
         .select('*').eq('tenant_id', tenantId).eq('ativo', true)
         .order('created_at', {ascending: false}).limit(20);
@@ -2345,11 +2348,7 @@ function _gbrAtivarPolling(tenantId) {
               tipo:n.tipo||'info', lida:n.lido||n.lida||false,
               ts:n.created_at ? new Date(n.created_at).getTime() : Date.now()};
             _notifCache.unshift(notif);
-            if (!notif.lida) {
-              toast('🔔 ' + notif.titulo, 'info');
-              renderNotifLista();
-              atualizarBadgeNotif();
-            }
+            if (!notif.lida) { toast('🔔 ' + notif.titulo, 'info'); renderNotifLista(); atualizarBadgeNotif(); }
             atualizado = true;
           }
         });
@@ -2381,86 +2380,86 @@ function _sbHandleChange(chave, payload) {
 
 // Colunas problemáticas conhecidas por tabela — removidas antes do upsert
 var _sbColunasRemover = {
-  clientes: ['created_at', 'updated_at'],  // banco usa DEFAULT NOW()
-  agendamentos: [],
-  servicos: ['created_at'],
-  produtos: ['created_at'],
-  caixas: ['created_at'],
-  movimentacoes: ['created_at'],
-  movimentacoes_financeiras: ['created_at'],
-  checklists: ['created_at'],
-  wa_templates: ['created_at']
+  clientes:                ['updated_at'],   // banco gerencia updated_at com trigger
+  agendamentos:            [],
+  servicos:                ['created_at'],
+  produtos:                ['created_at'],
+  caixas:                  ['created_at'],
+  movimentacoes:           ['created_at'],
+  movimentacoes_financeiras:['created_at'],
+  checklists:              ['created_at'],
+  wa_templates:            ['created_at'],
+  regras_fidelidade:       ['created_at'],
 };
 async function _sbUpsert(tabela, dados) {
   if (!_sbReady) { console.warn('[GBR] _sbUpsert ignorado: _sbReady=false. Tabela:', tabela); return null; }
   try {
-    // Suporte a upsert em massa (array de objetos)
     var isArray = Array.isArray(dados);
     var sanitizar = function(obj) {
       var s = Object.assign({}, obj);
       var remover = _sbColunasRemover[tabela] || [];
       remover.forEach(function(col){ delete s[col]; });
+      // Remover undefined e null só para colunas não obrigatórias
       Object.keys(s).forEach(function(k){ if(s[k]===undefined) delete s[k]; });
+      // Garantir que tenant_id seja string
+      if(s.tenant_id) s.tenant_id = String(s.tenant_id);
       return s;
     };
     var dadosSanitizados = isArray ? dados.map(sanitizar) : sanitizar(dados);
 
-    var r = await _sb.from(tabela).upsert(dadosSanitizados, {onConflict:'id', ignoreDuplicates:false});
+    // Upsert COM .select() para retornar o registro salvo
+    var r = await _sb.from(tabela).upsert(dadosSanitizados, {onConflict:'id', ignoreDuplicates:false}).select();
+
     if (r.error) {
-      // Tabela inexistente (42P01) — não é erro crítico
-      if (r.error.code === '42P01' || r.error.message.includes('does not exist') || r.error.message.includes('relation')) {
-        console.warn('[GBR] Tabela não existe ainda:', tabela);
-        return dados;
+      var msg = r.error.message || '';
+      // Tabela inexistente
+      if (r.error.code === '42P01' || msg.includes('does not exist') || msg.includes('relation')) {
+        console.warn('[GBR] Tabela não existe:', tabela); return dados;
       }
-      // RLS bloqueando (42501 = insufficient_privilege, 403 HTTP)
-      if (r.error.code === '42501' || r.status === 403 || r.error.message.includes('row-level security') || r.error.message.includes('new row violates')) {
-        console.error('[GBR SB] ❌ BLOQUEADO POR RLS na tabela "'+tabela+'"!');
-        console.error('[GBR SB] Erro:', r.error.message, '| Código:', r.error.code);
-        console.error('[GBR SB] Execute o SQL de políticas RLS no Supabase. Ver arquivo gbr_rls_setup.sql');
-        _gbrAtualizarIndicadorSync('off', 'Erro RLS');
-        toast('❌ Erro de permissão ao salvar "'+tabela+'". Verifique as políticas RLS no Supabase.', 'error');
+      // RLS bloqueando
+      if (r.error.code === '42501' || r.status === 403 || msg.includes('row-level security') || msg.includes('new row violates')) {
+        console.error('[GBR SB] ❌ BLOQUEADO POR RLS na tabela "'+tabela+'"! Execute GBR_SQL_CORRECOES_v2.sql no Supabase.');
+        _gbrAtualizarIndicadorSync('off', 'Erro RLS — execute o SQL');
+        toast('❌ Permissão negada para "'+tabela+'". Execute o SQL de políticas RLS no Supabase.', 'error');
         return null;
       }
-      // Coluna não encontrada — remover e retry
-      var colMatch = r.error.message.match(/find the '([^']+)' column/);
+      // Coluna não encontrada — remover e retry automático
+      var colMatch = msg.match(/column ['"]?([a-z_]+)['"]? (of relation|does not exist)/i) ||
+                     msg.match(/find the '([^']+)' column/);
       if (colMatch) {
         var badCol = colMatch[1];
-        console.warn('[GBR] Coluna não existe:', tabela+'.'+badCol, '— removendo e retry');
-        delete dadosSanitizados[badCol];
-        if (!_sbColunasRemover[tabela]) _sbColunasRemover[tabela] = [];
-        if (!_sbColunasRemover[tabela].includes(badCol)) _sbColunasRemover[tabela].push(badCol);
-        var r2 = await _sb.from(tabela).upsert(dadosSanitizados, {onConflict:'id', ignoreDuplicates:false});
-        if (r2.error) {
-          var r3 = await _sb.from(tabela).insert(dadosSanitizados);
-          if (r3.error && !r3.error.message.includes('duplicate') && !r3.error.message.includes('unique')) {
-            console.error('[GBR SB] ERRO retry upsert '+tabela+':', r3.error.message, r3.error.code); return null;
-          }
-        }
-        return dados;
+        console.warn('[GBR] Coluna inexistente:', tabela+'.'+badCol, '— retry sem ela');
+        if(!_sbColunasRemover[tabela]) _sbColunasRemover[tabela]=[];
+        if(!_sbColunasRemover[tabela].includes(badCol)) _sbColunasRemover[tabela].push(badCol);
+        if(isArray){dadosSanitizados.forEach(function(d){delete d[badCol];});}else{delete dadosSanitizados[badCol];}
+        var r2 = await _sb.from(tabela).upsert(dadosSanitizados, {onConflict:'id'}).select();
+        if(!r2.error) return r2.data ? (isArray ? r2.data : r2.data[0]) : dados;
+        // Se ainda falhar, tentar insert
+        var r3 = await _sb.from(tabela).insert(dadosSanitizados).select();
+        if(!r3.error) return r3.data ? (isArray ? r3.data : r3.data[0]) : dados;
+        console.error('[GBR SB] ERRO retry '+tabela+':', r3.error.message); return null;
       }
-      // Erro de tipo text vs uuid
-      if (r.error.message.includes('operator does not exist') || r.error.message.includes('text = uuid')) {
-        console.error('[GBR SB] ERRO TIPO upsert '+tabela+':', r.error.message);
-        toast('⚠️ Schema desatualizado. Execute o SQL de correção no Supabase.', 'warn');
-        return null;
+      // Erro de tipo uuid/text
+      if (msg.includes('operator does not exist') || msg.includes('text = uuid') || msg.includes('uuid = text')) {
+        console.error('[GBR SB] ERRO TIPO '+tabela+':', msg, '— execute GBR_SQL_CORRECOES_v2.sql');
+        toast('⚠️ Erro de tipo no banco. Execute o SQL de correção no Supabase.', 'warn'); return null;
       }
-      // Qualquer outro erro — logar completo para diagnóstico
-      console.error('[GBR SB] ERRO upsert "'+tabela+'":', JSON.stringify({
-        message: r.error.message,
-        code: r.error.code,
-        details: r.error.details,
-        hint: r.error.hint,
-        status: r.status,
-        dados: dadosSanitizados
-      }));
+      // Qualquer outro erro
+      console.error('[GBR SB] ERRO upsert "'+tabela+'":', {
+        message: msg, code: r.error.code, details: r.error.details,
+        hint: r.error.hint, status: r.status, dados: dadosSanitizados
+      });
+      _gbrAtualizarIndicadorSync('off', 'Erro: ' + (r.error.code||'?'));
       return null;
     }
-    return dados;
+    // Sucesso — retorna o objeto salvo (com dados do banco, ex: created_at gerado)
+    return r.data ? (isArray ? r.data : (r.data[0] || dados)) : dados;
   } catch(e) {
-    console.error('[GBR SB] EXCEÇÃO upsert '+tabela+':', e.message, e.stack);
+    console.error('[GBR SB] EXCEÇÃO upsert '+tabela+':', e.message);
     return null;
   }
 }
+
 async function _sbSoftDelete(tabela, id) {
   if (!_sbReady) { console.warn('[GBR] _sbSoftDelete ignorado: _sbReady=false'); return; }
   var r = await _sb.from(tabela).update({ativo:false}).eq('id',id);
