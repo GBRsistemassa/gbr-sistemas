@@ -3745,6 +3745,21 @@ function calcTotalAgend(){
   document.getElementById('agendTotal').textContent=fmtMoney(total);
 }
 
+// ═══════════════════════════════════════════════════════════
+//  HELPER: aguarda _sbTenantId ficar disponível (max 5s)
+//  Usado por todas as funções de salvar para evitar race condition
+//  no primeiro acesso após login
+// ═══════════════════════════════════════════════════════════
+async function _gbrAguardarTenant() {
+  if (_sbTenantId) return true;
+  if (!_sbReady) return false;
+  for (var _wi = 0; _wi < 10; _wi++) {
+    await new Promise(function(r){ setTimeout(r, 500); });
+    if (_sbTenantId) return true;
+  }
+  return !!_sbTenantId;
+}
+
 async function salvarAgendamento(){
   const id=document.getElementById('agendId').value;
   const cid=document.getElementById('agendClienteId').value;
@@ -3896,6 +3911,7 @@ async function salvarCliente(){
   else { dados.id = uid(); dados.pontos_fidelidade = 0; }
 
   // Supabase upsert (sincroniza todos os devices automaticamente via Realtime)
+  await _gbrAguardarTenant();
   if (_sb && _sbTenantId) {
     console.log('[GBR] salvarCliente: _sbReady='+_sbReady+' _sbTenantId='+_sbTenantId);
     const sbDados = {...dados};
@@ -3908,9 +3924,7 @@ async function salvarCliente(){
     if (saved) {
       _gbrAtualizarIndicadorSync('ok', 'Salvo');
     } else {
-      // saved=null significa que _sbUpsert retornou erro real — já foi logado e mostrado toast lá
-      // Não chama salvarDados() aqui para não mascarar o problema
-      console.error('[GBR] salvarCliente: upsert retornou null. Dado NÃO foi para o Supabase. Verifique console acima.');
+      console.error('[GBR] salvarCliente: upsert retornou null. Verifique console acima.');
       _gbrAtualizarIndicadorSync('off', 'Erro ao salvar');
     }
   } else {
@@ -3919,7 +3933,11 @@ async function salvarCliente(){
     const idx2=DATA.clientes.findIndex(c=>c.id===dados.id);
     if(idx2>=0) Object.assign(DATA.clientes[idx2],dados); else DATA.clientes.push(dados);
     try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}
-    toast('⚠️ Sem conexão com a nuvem. Dado salvo localmente.', 'warn');
+    if (_sbReady && !_sbTenantId) {
+      toast('⚠️ Usuário sem estética vinculada. Execute o SQL de vínculo no Supabase.', 'warn');
+    } else {
+      toast('⚠️ Sem conexão com a nuvem. Dado salvo localmente.', 'warn');
+    }
   }
   if(typeof logAuditoria==='function')logAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente',dados.nome_completo);
   if(_sbTenantId) _sbLogAuditoria(_isNovoC?'Cadastrou Cliente':'Editou Cliente','Clientes',dados.nome_completo);
@@ -4000,6 +4018,7 @@ async function salvarServico(){
     leva_traz:document.getElementById('s_levaTraz').checked};
   const sId=id||uid();
   const sFull={id:sId,tenant_id:currentTenant?.id,...dados,ativo:true,updated_at:new Date().toISOString()};
+  await _gbrAguardarTenant();
   // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
     _gbrAtualizarIndicadorSync('saving','Salvando serviço...');
@@ -4124,6 +4143,7 @@ async function salvarProduto(){
   };
   const pId=id||uid();
   const pFull={id:pId,tenant_id:currentTenant?.id,...dados,ativo:true,updated_at:new Date().toISOString()};
+  await _gbrAguardarTenant();
   // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
     _gbrAtualizarIndicadorSync('saving','Salvando produto...');
@@ -4482,6 +4502,7 @@ async function salvarRegra(){
     tipo:document.getElementById('r_tipo').value,valor:document.getElementById('r_valor').value,ativo:true};
   const rId=id||uid();
   const rFull={id:rId,tenant_id:currentTenant?.id,...dados,updated_at:new Date().toISOString()};
+  await _gbrAguardarTenant();
   // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
     _gbrAtualizarIndicadorSync('saving','Salvando regra...');
@@ -4614,6 +4635,7 @@ async function abrirCaixa(){
   const total=Object.values(contagem).reduce((a,b)=>a+b,0);
   currentCaixa={id:uid(),tenant_id:currentTenant?.id,saldo_inicial:total,contagem_abertura:contagem,total_esperado:total,status:'aberto',aberto_em:new Date().toISOString()};
   DATA.caixas.push(currentCaixa);
+  await _gbrAguardarTenant();
   // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb&&_sbTenantId){
     _gbrAtualizarIndicadorSync('saving','Abrindo caixa...');
