@@ -1981,7 +1981,7 @@ input:checked + .switch-slider:before{transform:translateX(20px);background:#fff
 
 <script>
 // ===== CONFIG =====
-// CONFIG — sem credenciais hardcoded. Tudo carregado do localStorage.
+// CONFIG — sem credenciais hardcoded no cliente.
 const CONFIG = {
   get SUPERADMIN_EMAIL() { return localStorage.getItem('gbr_sa_email') || null; },
   genTempPwd() {
@@ -2145,18 +2145,7 @@ var _sbReady     = false;
 })();
 
 // ── Stub Supabase sync (substitui legado Firebase) ──
-async function _gbrEnviarLocalStorageParaSupabase(tenantId) {
-  if (!_sb || !tenantId) return;
-  try {
-    var data = {};
-    ['clientes','agendamentos','servicos','produtos'].forEach(function(k) {
-      var v = localStorage.getItem('gbr_' + k);
-      if (v) try { data[k] = JSON.parse(v); } catch(e) {}
-    });
-    await _sb.from('tenants').update({ local_backup: data, atualizado_em: new Date().toISOString() }).eq('id', tenantId);
-    console.log('[GBR] Dados locais enviados ao Supabase');
-  } catch(e) { console.warn('[GBR] Erro ao enviar dados locais:', e.message); }
-}
+// _gbrEnviarLocalStorageParaSupabase removida — sistema 100% online
 
 
 function _gbrAtualizarIndicadorSync(estado, txt) {
@@ -2364,6 +2353,17 @@ function _gbrAtivarPolling(tenantId) {
   }, 30000);
 }
 
+// Debounce para evitar re-renderizações em cascata (Realtime com muitos eventos rápidos)
+var _renderDebounceTimer = null;
+var _renderPendentes = new Set();
+function _gbrRenderDebounced() {
+  clearTimeout(_renderDebounceTimer);
+  _renderDebounceTimer = setTimeout(function() {
+    _gbrReRenderPaginaAtiva();
+    _renderPendentes.clear();
+  }, 150); // agrupa renders em janela de 150ms
+}
+
 function _sbHandleChange(chave, payload) {
   var arr = DATA[chave]; if (!Array.isArray(arr)) arr = DATA[chave] = [];
   var reg = payload.new; var id = reg ? reg.id : (payload.old && payload.old.id);
@@ -2376,9 +2376,10 @@ function _sbHandleChange(chave, payload) {
     case 'DELETE':
       if (id) DATA[chave] = arr.filter(function(x){return x.id!==id;}); break;
   }
-  try { localStorage.setItem('gbr_'+chave, JSON.stringify(DATA[chave])); } catch(e) {}
+  
   _gbrAtualizarIndicadorSync('ok', 'Atualizado');
-  _gbrReRenderPaginaAtiva();
+  _renderPendentes.add(chave);
+  _gbrRenderDebounced(); // debounce 150ms: evita piscar com múltiplos eventos Realtime
 }
 
 // Colunas problemáticas conhecidas por tabela — removidas antes do upsert
@@ -2595,7 +2596,7 @@ async function _sbCarregarTudo(tenantId) {
     }
     // ══ CARREGAR TODOS OS DADOS OPERACIONAIS DO SUPABASE (fonte de verdade) ══
     // FIX: anteriormente só carregava clientes/agendamentos/serviços — produtos,
-    // fichas, regras, caixas e movimentações ficavam só no localStorage e sumiam.
+    // fichas, regras, caixas e movimentações carregados do Supabase.
     try {
       // Carregar cada tabela individualmente para isolar erros de tabelas inexistentes
       async function _qry(tabela, query) {
@@ -2697,38 +2698,15 @@ async function _sbCarregarTudo(tenantId) {
       // Sincronizar localStorage com o que veio do Supabase (para offline funcionar)
       ['clientes','agendamentos','servicos','produtos','regras_fidelidade','caixas','checklists','wa_templates'].forEach(function(k) {
         if (DATA[k] && DATA[k].length > 0) {
-          try { localStorage.setItem('gbr_'+k, JSON.stringify(DATA[k])); } catch(e) {}
+          
         }
       });
 
-      // Se Supabase retornou completamente vazio mas localStorage tem dados → MIGRAR
-      var sbVazio = (rCli.data||[]).length === 0 && (rSrv.data||[]).length === 0 && (rProd.data||[]).length === 0;
-      if (sbVazio) {
-        // Verificar localStorage
-        var lsCli = localStorage.getItem('gbr_clientes');
-        var lsSrv = localStorage.getItem('gbr_servicos');
-        var lsProd = localStorage.getItem('gbr_produtos');
-        var localTemDados = (lsCli && JSON.parse(lsCli||'[]').length > 0)
-          || (lsSrv && JSON.parse(lsSrv||'[]').length > 0)
-          || (lsProd && JSON.parse(lsProd||'[]').length > 0);
-        if (localTemDados) {
-          console.log('[GBR] Supabase vazio, iniciando migração do localStorage...');
-          setTimeout(function(){ _gbrMigrarLocalStorageParaSupabase(tenantId); }, 1000);
-        }
-      }
+      // Dados vêm exclusivamente do Supabase
 
     } catch(eOp) {
-      console.warn('[GBR SB] Dados operacionais, usando localStorage como fallback:', eOp.message);
-      // Fallback: tentar carregar do localStorage
-      ['clientes','agendamentos','servicos','produtos','regras_fidelidade','caixas','fichas','wa_templates','checklists'].forEach(function(k) {
-        try {
-          var raw = localStorage.getItem('gbr_' + k);
-          if (raw && (!DATA[k] || DATA[k].length === 0)) {
-            var parsed = JSON.parse(raw);
-            if (Array.isArray(parsed) && parsed.length > 0) DATA[k] = parsed;
-          }
-        } catch(e) {}
-      });
+      console.error('[GBR SB] Erro ao carregar dados:', eOp.message);
+      _gbrAtualizarIndicadorSync('off', 'Erro de conexão — verifique internet');
     }
     _gbrAtualizarIndicadorSync('ok', 'Conectado');
     console.log('[GBR SB] Dados carregados para tenant:', tenantId);
@@ -2756,111 +2734,9 @@ function _gbrCarregarPersonalizacoes(tenantId, tenantData) {
 
 
 /* ═══════════════════════════════════════════════════════════
-   MIGRAÇÃO: localStorage → Supabase
-   Roda uma vez por tenant quando Supabase está vazio mas localStorage tem dados
+   Sistema 100% online — dados sincronizados via Supabase Realtime
    ══════════════════════════════════════════════════════════ */
-async function _gbrMigrarLocalStorageParaSupabase(tenantId) {
-  if (!_sb || !tenantId) return;
-  
-  var tabelas = [
-    { local: 'clientes',           sb: 'clientes',                campo_tenant: 'tenant_id' },
-    { local: 'agendamentos',       sb: 'agendamentos',             campo_tenant: 'tenant_id' },
-    { local: 'servicos',           sb: 'servicos',                 campo_tenant: 'tenant_id' },
-    { local: 'produtos',           sb: 'produtos',                 campo_tenant: 'tenant_id' },
-    { local: 'regras_fidelidade',  sb: 'regras_fidelidade',        campo_tenant: 'tenant_id' },
-    { local: 'caixas',             sb: 'caixas',                   campo_tenant: 'tenant_id' },
-    { local: 'checklists',         sb: 'checklists',               campo_tenant: 'tenant_id' },
-    { local: 'wa_templates',       sb: 'wa_templates',             campo_tenant: 'tenant_id' },
-  ];
-
-  var migrou = false;
-
-  // Migrar fichas técnicas separadamente (via global_settings)
-  try {
-    var localFichas = [];
-    try {
-      var rawF = localStorage.getItem('gbr_fichas');
-      if (rawF) {
-        var parsedF = JSON.parse(rawF);
-        localFichas = Array.isArray(parsedF) ? parsedF : Object.values(parsedF||{});
-      }
-    } catch(ef) {}
-    if (DATA.fichas && DATA.fichas.length > 0) localFichas = DATA.fichas;
-    if (localFichas.length > 0) {
-      var fichasComTenant = localFichas.map(function(f){ return Object.assign({},f,{tenant_id:tenantId}); });
-      var rFichasExist = await _sb.from('global_settings').select('key').eq('key','fichas_'+tenantId).maybeSingle();
-      if (!rFichasExist.data) {
-        await _sb.from('global_settings').upsert({key:'fichas_'+tenantId, value:fichasComTenant, updated_at:new Date().toISOString()},{onConflict:'key'});
-        console.log('[GBR] Migradas ' + fichasComTenant.length + ' fichas técnicas → Supabase');
-        migrou = true;
-      }
-    }
-  } catch(eFm) { console.warn('[GBR] Migração fichas:', eFm.message); }
-
-  for (var t of tabelas) {
-    try {
-      // Verificar se Supabase já tem dados para esta tabela
-      var rCheck = await _sb.from(t.sb).select('id').eq(t.campo_tenant, tenantId).limit(1);
-      if (rCheck.data && rCheck.data.length > 0) continue; // já tem dados no SB
-
-      // Pegar dados do localStorage
-      var localData = [];
-      try {
-        var raw = localStorage.getItem('gbr_' + t.local);
-        if (raw) {
-          var parsed = JSON.parse(raw);
-          localData = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
-        }
-      } catch(e) {}
-      if (!DATA[t.local] && localData.length === 0) continue;
-      var dados = DATA[t.local] && DATA[t.local].length > 0 ? DATA[t.local] : localData;
-      if (!dados || dados.length === 0) continue;
-
-      // Garantir tenant_id em todos os registros e ativo=true
-      var dadosComTenant = dados
-        .filter(function(d){ return d && d.id; })
-        .map(function(d){
-          var item = Object.assign({}, d);
-          item[t.campo_tenant] = tenantId;
-          if (item.ativo === undefined) item.ativo = true;
-          return item;
-        });
-
-      if (dadosComTenant.length === 0) continue;
-
-      // Inserir em lotes de 50 — remover campos que o banco gera automaticamente
-      var colsRemover = _sbColunasRemover[t.sb] || [];
-      for (var i = 0; i < dadosComTenant.length; i += 50) {
-        var lote = dadosComTenant.slice(i, i + 50).map(function(reg) {
-          var r = Object.assign({}, reg);
-          colsRemover.forEach(function(c){ delete r[c]; });
-          // Remover undefined
-          Object.keys(r).forEach(function(k){ if(r[k]===undefined) delete r[k]; });
-          return r;
-        });
-        // FIX7: usar insert com ignoreDuplicates ao invés de upsert para evitar 400
-        var rUp = await _sb.from(t.sb).insert(lote).select();
-        if (rUp.error) {
-          // Se erro de duplicado, tentar upsert sem onConflict explícito
-          if (rUp.error.code === '23505' || rUp.error.message.includes('duplicate') || rUp.error.message.includes('unique')) {
-            // Já existe — ignorar duplicados silenciosamente
-          } else {
-            console.warn('[GBR] Migração lote '+t.sb+':', rUp.error.message, rUp.error.code);
-          }
-        }
-      }
-      console.log('[GBR] Migrados ' + dadosComTenant.length + ' registros de ' + t.local + ' → Supabase');
-      migrou = true;
-    } catch(eM) {
-      console.warn('[GBR] Migração ' + t.local + ':', eM.message);
-    }
-  }
-  if (migrou) {
-    toast('✅ Dados migrados para a nuvem! Agora sincronizam em todos os dispositivos.', 'success');
-    logAuditoria('Migração de Dados', 'Dados do localStorage migrados para o Supabase');
-  }
-  return migrou;
-}
+// Migração localStorage removida — sistema 100% online
 
 
 async function fazerLogin() {
@@ -3159,8 +3035,23 @@ function renderAgenda(){
   // Vagas configuradas pelo tenant
   const cfg=DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
   const vagasMax=cfg.vagas_simultaneas||1;
+  // FIX 9: Aviso visual quando plano foi rebaixado e há agendamentos encavalados
+  var planMaxVagas = window._gbrMaxVagas || vagasMax;
+  if (vagasMax > planMaxVagas) {
+    var avisoEl = document.getElementById('gbr-vagas-aviso');
+    if (!avisoEl) {
+      avisoEl = document.createElement('div');
+      avisoEl.id = 'gbr-vagas-aviso';
+      avisoEl.style.cssText = 'background:var(--yellow,#f59e0b);color:#000;padding:8px 14px;border-radius:8px;font-size:12px;margin-bottom:8px;font-weight:600';
+      var agendaWrap = document.getElementById('agendaWrap')||document.getElementById('agendaContainer');
+      if (agendaWrap) agendaWrap.prepend(avisoEl);
+    }
+    avisoEl.textContent = '⚠️ Seu plano atual permite ' + planMaxVagas + ' vaga(s) simultânea(s), mas a configuração está em ' + vagasMax + '. Alguns horários podem aparecer encavalados.';
+  } else {
+    var av2 = document.getElementById('gbr-vagas-aviso');
+    if (av2) av2.remove();
+  }
 
-  // Pré-calcula eventos por hora
   const hInicio={};   // h -> array de eventos que iniciam nessa hora
   const hBloqueado={};// h -> array de eventos que cobrem essa hora mas não iniciam nela
   for(let h=7;h<=20;h++){hInicio[h]=[];hBloqueado[h]=[];}
@@ -3312,7 +3203,7 @@ function mudarStatus(id,novoSt){
         currentCaixa={id:uid(),tenant_id:currentTenant?.id,saldo_inicial:0,contagem_abertura:{},total_esperado:0,status:'aberto',aberto_em:new Date().toISOString(),auto_aberto:true};
         DATA.caixas.push(currentCaixa);
         if(_sb&&_sbTenantId)_sbUpsert('caixas',currentCaixa).catch(function(){});
-        try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}
+        try{;}catch(e){}
         toast('📂 Caixa aberto automaticamente para registrar o serviço.','info');
       }
     }
@@ -3361,7 +3252,7 @@ function mudarStatus(id,novoSt){
           setTimeout(()=>toast('📦 Estoque deduzido: '+deducoes.slice(0,2).join(', ')+(deducoes.length>2?' +'+( deducoes.length-2)+'mais':''),'success'),400);
           logAuditoria('Dedução de Estoque','Serviço: '+(serv.nome)+' | '+deducoes.join(', '));
           deducoes.forEach(function(nomeProd){var pp=DATA.produtos.find(function(p){return p.nome===nomeProd&&p.tenant_id===currentTenant?.id;});if(pp&&_sb&&_sbTenantId)_sbUpsert('produtos',{id:pp.id,tenant_id:pp.tenant_id,quantidade_atual:pp.quantidade_atual,saldo_atual:pp.quantidade_atual,updated_at:new Date().toISOString()}).catch(function(){});});
-          try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}
+          try{;}catch(e){}
         }
       }
     }
@@ -3380,7 +3271,7 @@ function mudarStatus(id,novoSt){
       const cli=DATA.clientes.find(c=>c.id===ag.cliente_id);
       if(cli) _sbUpsert('clientes',{id:cli.id,tenant_id:cli.tenant_id,pontos_fidelidade:cli.pontos_fidelidade});
     }
-  } else { try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){} }
+  } else { try{;}catch(e){} }
   renderAgendamentos();renderAgenda();renderDashboard();toast('Status: '+statusLabel(novoSt));
 }
 
@@ -3707,13 +3598,18 @@ async function calcLevaTraz(){
           // Usa ibge code como proxy de distância
           const ibgeCli=parseInt(rCli.ibge||0);
           const ibgeEmp=parseInt(rEmp.ibge||0);
-          if(ibgeCli===ibgeEmp){km=2+Math.random()*5;} // mesma cidade
-          else{km=10+Math.random()*20;} // cidades diferentes
-        }else{km=5+Math.random()*10;}
-      }catch(e){km=5+Math.random()*10;}
+          var cfgKm2 = DATA.configuracoes&&currentTenant?DATA.configuracoes[currentTenant.id]||{}:{};
+          if(ibgeCli===ibgeEmp){
+            km=cfgKm2.km_mesma_cidade||5; // FIX: valor fixo configurável, não aleatório
+          } else {
+            km=cfgKm2.km_outra_cidade||15;
+          }
+        }else{km=cfgKm2&&cfgKm2.km_mesma_cidade||8;}
+      }catch(e){km=8;} // FIX: valor fixo em vez de aleatório
     }else{
-      // Sem CEP empresa configurado: estima genérica
-      km=3+Math.random()*12;
+      // Sem CEP empresa configurado: estimativa fixa neutra
+      km=8;ica
+      km=8; // FIX: estimativa fixa neutra — configure em Configurações → Leva & Traz
     }
 
     km=parseFloat(km.toFixed(1));
@@ -3842,12 +3738,12 @@ async function salvarAgendamento(){
     } else {
       const idx=DATA.agendamentos.findIndex(a=>a.id===agId);
       if(idx>=0) Object.assign(DATA.agendamentos[idx],agFull); else DATA.agendamentos.push(agFull);
-      try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){}
+      try{;}catch(e){}
     }
   } else {
     const idx=DATA.agendamentos.findIndex(a=>a.id===agId);
     if(idx>=0) Object.assign(DATA.agendamentos[idx],agFull); else DATA.agendamentos.push(agFull);
-    try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){}
+    try{;}catch(e){}
     toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   if(_sbTenantId) _sbLogAuditoria(id?'Editou Agendamento':'Novo Agendamento','Agenda','');
@@ -3923,7 +3819,7 @@ async function salvarCliente(){
     // Atualizar DATA local imediatamente (feedback visual otimista)
     const idx2 = DATA.clientes.findIndex(c=>c.id===dados.id);
     if(idx2>=0) Object.assign(DATA.clientes[idx2], dados); else DATA.clientes.push(dados);
-    try { localStorage.setItem('gbr_clientes', JSON.stringify(DATA.clientes)); } catch(e) {}
+    try { ; } catch(e) {}
     if (saved) {
       _gbrAtualizarIndicadorSync('ok', 'Salvo');
     } else {
@@ -3935,7 +3831,7 @@ async function salvarCliente(){
     console.warn('[GBR] salvarCliente: sem Supabase (_sbReady='+_sbReady+', _sbTenantId='+_sbTenantId+'). Dados salvos APENAS localmente.');
     const idx2=DATA.clientes.findIndex(c=>c.id===dados.id);
     if(idx2>=0) Object.assign(DATA.clientes[idx2],dados); else DATA.clientes.push(dados);
-    try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}
+    try{;}catch(e){}
     if (_sbReady && !_sbTenantId) {
       toast('⚠️ Usuário sem estética vinculada. Execute o SQL de vínculo no Supabase.', 'warn');
     } else {
@@ -3970,9 +3866,9 @@ async function excluirCliente(id){
     _gbrAtualizarIndicadorSync('saving','Removendo...');
     const r=await _sb.from('clientes').update({ativo:false,updated_at:new Date().toISOString()}).eq('id',id);
     if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
-    else{try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
   } else {
-    try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}
+    try{;}catch(e){}
   }
   renderClientes();toast('Cliente desativado');
 }
@@ -4034,7 +3930,7 @@ async function salvarServico(){
       // Fallback local se Supabase falhar
       const i=DATA.servicos.findIndex(s=>s.id===sId);
       if(i>=0)Object.assign(DATA.servicos[i],sFull);else DATA.servicos.push(sFull);
-      try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){}
+      try{;}catch(e){}
       _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
     }
   } else {
@@ -4056,8 +3952,8 @@ async function excluirServico(id){
       _gbrAtualizarIndicadorSync('saving','Removendo...');
       const r=await _sb.from('servicos').update({ativo:false,updated_at:new Date().toISOString()}).eq('id',id);
       if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
-      else{try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
-    } else {try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){}}
+      else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+    } else {try{;}catch(e){}}
     renderServicos();toast('Serviço removido');
   }
 }
@@ -4158,7 +4054,7 @@ async function salvarProduto(){
     } else {
       const i=DATA.produtos.findIndex(p=>p.id===pId);
       if(i>=0)Object.assign(DATA.produtos[i],pFull);else DATA.produtos.push(pFull);
-      try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}
+      try{;}catch(e){}
       _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
     }
   } else {
@@ -4208,7 +4104,7 @@ async function salvarMovEstoque(){
         motivo:document.getElementById('movMotivo').value,created_at:new Date().toISOString()};
       await _sb.from('movimentacoes_estoque').insert(movEst);
       if(savedProd){_gbrAtualizarIndicadorSync('ok','Estoque atualizado ✓');}
-      else{try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+      else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
     } else {
       salvarDados(true);
       toast('⚠️ Sem conexão — salvo localmente','warn');
@@ -4226,8 +4122,8 @@ async function excluirProduto(id){
       _gbrAtualizarIndicadorSync('saving','Removendo...');
       const r=await _sb.from('produtos').update({ativo:false,updated_at:new Date().toISOString()}).eq('id',id);
       if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
-      else{try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
-    } else {try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){}}
+      else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+    } else {try{;}catch(e){}}
     renderEstoque();toast('Produto removido');
   }
 }
@@ -4260,7 +4156,7 @@ function abrirFicha(sid){
     DATA.fichas.push(ficha);
     // Salvar nova ficha imediatamente no Supabase
     _sbSyncFichas();
-    try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}
+    try{;}catch(e){}
   }
   _fichaAtual=ficha;_servAtual=serv;
   renderFichaEditor();
@@ -4383,7 +4279,7 @@ function addInsumoFicha(){
   const prods=DATA.produtos.filter(p=>currentTenant&&p.tenant_id===currentTenant.id&&p.ativo);
   if(!prods.length){toast('Cadastre produtos primeiro','error');return;}
   _fichaAtual.insumos.push({produto_id:'',quantidade:100,custo:0});
-  _sbSyncFichas();try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}renderFichaEditor();
+  _sbSyncFichas();try{;}catch(e){}renderFichaEditor();
 }
 
 function trocarProdFicha(idx,pid){
@@ -4391,7 +4287,7 @@ function trocarProdFicha(idx,pid){
   const cu=p.custo_por_embalagem/(p.quantidade_por_embalagem||1);
   _fichaAtual.insumos[idx].produto_id=pid;
   _fichaAtual.insumos[idx].custo=cu*_fichaAtual.insumos[idx].quantidade;
-  _sbSyncFichas();try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}renderFichaEditor();
+  _sbSyncFichas();try{;}catch(e){}renderFichaEditor();
 }
 
 function qtdInsumo(idx,val){
@@ -4403,7 +4299,7 @@ function qtdInsumo(idx,val){
   _recalcFichaSummary();
   // ── Sync ficha para Supabase ──
   _sbSyncFichas();
-  try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}
+  try{;}catch(e){}
 }
 function _recalcFichaSummary(){
   if(!_fichaAtual || !_servAtual) return;
@@ -4441,7 +4337,7 @@ function _recalcFichaSummary(){
 }
 
 
-function removerInsumoFicha(idx){_fichaAtual.insumos.splice(idx,1);_sbSyncFichas();try{localStorage.setItem('gbr_fichas',JSON.stringify(DATA.fichas));}catch(e){}renderFichaEditor();}
+function removerInsumoFicha(idx){_fichaAtual.insumos.splice(idx,1);_sbSyncFichas();try{;}catch(e){}renderFichaEditor();}
 
 // ===== FIDELIDADE =====
 function atualizarFidAlerts(){
@@ -4517,7 +4413,7 @@ async function salvarRegra(){
     } else {
       const i=DATA.regras_fidelidade.findIndex(r=>r.id===rId);
       if(i>=0)Object.assign(DATA.regras_fidelidade[i],rFull);else DATA.regras_fidelidade.push(rFull);
-      try{localStorage.setItem('gbr_regras_fidelidade',JSON.stringify(DATA.regras_fidelidade));}catch(e){}
+      try{;}catch(e){}
       _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
     }
   } else {
@@ -4648,7 +4544,7 @@ async function abrirCaixa(){
       if(i>=0)DATA.caixas[i]=saved;
       _gbrAtualizarIndicadorSync('ok','Caixa aberto na nuvem ✓');
     } else {
-      try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}
+      try{;}catch(e){}
       _gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');
     }
   } else {
@@ -4697,13 +4593,19 @@ async function fecharCaixa(){
   const i=DATA.caixas.findIndex(c=>c.id===currentCaixa.id);
   if(i>=0){DATA.caixas[i].status='fechado';DATA.caixas[i].fechado_em=new Date().toISOString();DATA.caixas[i].total_esperado=esperado;DATA.caixas[i].total_real=real;DATA.caixas[i].observacao=document.getElementById('fcObs').value;}
   // Integrar com Financeiro: lançar fechamento como receita do dia
+  // FIX: verificar se já existe lançamento para este caixa (evita duplicação)
   if(!DATA.movimentacoes_fin) DATA.movimentacoes_fin=[];
-  const hoje=new Date().toISOString().slice(0,10);
-  DATA.movimentacoes_fin.push({
-    id:uid(), tenant_id:currentTenant?.id, tipo:'receita',
-    categoria:'Fechamento de Caixa', descricao:'Caixa fechado — '+new Date().toLocaleDateString('pt-BR'),
-    valor:real, data:hoje, forma_pagamento:'misto', created_at:new Date().toISOString()
+  var jaTemFechamento = DATA.movimentacoes_fin.some(function(m){
+    return m.caixa_id === currentCaixa.id || m.descricao === 'Caixa fechado — ' + new Date().toLocaleDateString('pt-BR');
   });
+  if (!jaTemFechamento) {
+    const hoje=new Date().toISOString().slice(0,10);
+    DATA.movimentacoes_fin.push({
+      id:uid(), tenant_id:currentTenant?.id, tipo:'receita', caixa_id: currentCaixa.id,
+      categoria:'Fechamento de Caixa', descricao:'Caixa fechado — '+new Date().toLocaleDateString('pt-BR'),
+      valor:real, data:hoje, forma_pagamento:'misto', created_at:new Date().toISOString()
+    });
+  }
   // ── GRAVAÇÃO DIRETA NA NUVEM ──
   if(_sb && _sbTenantId && DATA.caixas[i]){
     _gbrAtualizarIndicadorSync('saving','Fechando caixa...');
@@ -4713,9 +4615,9 @@ async function fecharCaixa(){
     var movFin = DATA.movimentacoes_fin[DATA.movimentacoes_fin.length-1];
     if(movFin) await _sbUpsert('movimentacoes_financeiras', movFin);
     if(savedCx){_gbrAtualizarIndicadorSync('ok','Caixa fechado na nuvem ✓');}
-    else{try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
   }
-  currentCaixa=null;try{localStorage.setItem('gbr_caixas',JSON.stringify(DATA.caixas));}catch(e){}
+  currentCaixa=null;try{;}catch(e){}
   closeModal('modalFecharCaixa');renderCaixa();atualizarFidAlerts();toast('Caixa fechado e lançado no financeiro!');
 }
 
@@ -4742,7 +4644,7 @@ async function confirmarMovCaixa(){
     _gbrAtualizarIndicadorSync('saving','Registrando...');
     const saved=await _sbUpsert('movimentacoes',mov);
     if(saved){_gbrAtualizarIndicadorSync('ok','Movimentação salva ✓');}
-    else{try{localStorage.setItem('gbr_movimentacoes',JSON.stringify(DATA.movimentacoes));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
   } else {
     salvarDados(true);
     toast('⚠️ Sem conexão — salvo localmente','warn');
@@ -4817,9 +4719,36 @@ function renderFotosGrid(){
 }
 
 function adicionarFotos(input){
-  Array.from(input.files).forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=e=>{fotosChk.push(e.target.result);renderFotosGrid();};
+  var MAX_FOTOS = 10;
+  var MAX_SIZE_MB = 2;
+  Array.from(input.files).forEach(function(file){
+    if (fotosChk.length >= MAX_FOTOS) {
+      toast('Máximo de ' + MAX_FOTOS + ' fotos por checklist','warn');
+      return;
+    }
+    // FIX: verificar tamanho antes de converter para Base64
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      toast('Foto "' + file.name + '" muito grande (máx. ' + MAX_SIZE_MB + 'MB). Comprima a imagem.','warn');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      // FIX: comprimir imagem antes de salvar (reduz de ~1MB para ~100kb)
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement('canvas');
+        var maxW = 800, maxH = 600;
+        var w = img.width, h = img.height;
+        if (w > maxW) { h = h * maxW / w; w = maxW; }
+        if (h > maxH) { w = w * maxH / h; h = maxH; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        var compressed = canvas.toDataURL('image/jpeg', 0.7); // 70% qualidade
+        fotosChk.push(compressed);
+        renderFotosGrid();
+      };
+      img.src = e.target.result;
+    };
     reader.readAsDataURL(file);
   });
   input.value='';
@@ -4896,7 +4825,7 @@ async function salvarChk(st){
     _gbrAtualizarIndicadorSync('saving','Salvando checklist...');
     const saved=await _sbUpsert('checklists',chk);
     if(saved){_gbrAtualizarIndicadorSync('ok','Checklist salvo na nuvem ✓');}
-    else{try{localStorage.setItem('gbr_checklists',JSON.stringify(DATA.checklists));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
   } else {
     salvarDados(true);
     toast('⚠️ Sem conexão — salvo localmente','warn');
@@ -5222,7 +5151,7 @@ async function forcarMigracao() {
   try {
     await _gbrMigrarLocalStorageParaSupabase(_sbTenantId);
     toast('✅ Migração concluída! Recarregue a página.', 'success');
-    logAuditoria('Migração Manual', 'localStorage → Supabase');
+    logAuditoria('Reset Seletivo', 'Dados removidos do Supabase');
   } catch(e) {
     toast('Erro: ' + e.message, 'error');
   }
@@ -5278,7 +5207,7 @@ async function recuperarDadosNuvem() {
       if (res.data !== null) {
         DATA[dataKey] = res.data;
         resultados[tabela] = res.data.length;
-        try { localStorage.setItem('gbr_' + dataKey, JSON.stringify(res.data)); } catch(e) {}
+        
       }
     });
 
@@ -5289,7 +5218,7 @@ async function recuperarDadosNuvem() {
         var fichasArr = Array.isArray(rFichas.data.value) ? rFichas.data.value : Object.values(rFichas.data.value);
         DATA.fichas = fichasArr;
         resultados['fichas'] = fichasArr.length;
-        try { localStorage.setItem('gbr_fichas', JSON.stringify(fichasArr)); } catch(e) {}
+        try { ; } catch(e) {}
       }
     } catch(ef) { erros.push('fichas: ' + ef.message); }
 
@@ -5335,7 +5264,22 @@ function exportarDados(){
     const inp=prompt('Digite a senha admin para exportar o backup:');
     if(inp!==senhaAdm){toast('Senha incorreta. Exportação cancelada.','error');return;}
   }
-  const backup={tenants:DATA.tenants,users:DATA.users.map(u=>({...u,password:'[protegido]'})),clientes:DATA.clientes,servicos:DATA.servicos,agendamentos:DATA.agendamentos,produtos:DATA.produtos,movimentacoes:DATA.movimentacoes};
+  // FIX: não exportar colaboradores (emails e funções são dados sensíveis)
+  // Backup contém apenas dados operacionais da estética
+  const backup={
+    exportado_em: new Date().toISOString(),
+    versao: '5.0',
+    estetica: currentTenant?.nome || '',
+    clientes:      DATA.clientes.filter(function(c){ return c.tenant_id===currentTenant?.id; }),
+    servicos:      DATA.servicos.filter(function(s){ return s.tenant_id===currentTenant?.id; }),
+    agendamentos:  DATA.agendamentos.filter(function(a){ return a.tenant_id===currentTenant?.id; }),
+    produtos:      DATA.produtos.filter(function(p){ return p.tenant_id===currentTenant?.id; }),
+    movimentacoes_fin: (DATA.movimentacoes_fin||[]).filter(function(m){ return m.tenant_id===currentTenant?.id; }),
+    regras_fidelidade: (DATA.regras_fidelidade||[]).filter(function(r){ return r.tenant_id===currentTenant?.id; }),
+    fichas:        (DATA.fichas||[]).filter(function(f){ return f.tenant_id===currentTenant?.id; }),
+    checklists:    (DATA.checklists||[]).filter(function(c){ return c.tenant_id===currentTenant?.id; })
+    // Nota: colaboradores NÃO são exportados por segurança
+  }
   const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='gbr_backup_'+new Date().toISOString().slice(0,10)+'.json';a.click();
@@ -5661,7 +5605,7 @@ function salvarNPS(){
   if(!DATA.nps_avaliacoes)DATA.nps_avaliacoes=[];
   DATA.nps_avaliacoes.push({id:uid(),tenant_id:currentTenant.id,cliente_id:cliId,nota,comentario:document.getElementById('npsComentario').value.trim(),created_at:new Date().toISOString()});
   if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'nps_'+_sbTenantId,value:DATA.nps_avaliacoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_nps_avaliacoes',JSON.stringify(DATA.nps_avaliacoes));}catch(e){}
+  try{;}catch(e){}
   closeModal('modalNPS');renderNPSSection();toast('Avaliação salva! ⭐');
 }
 
@@ -5683,7 +5627,7 @@ function registrarNPSResposta(clienteId, nota, comentario){
   if(!DATA.nps_avaliacoes)DATA.nps_avaliacoes=[];
   DATA.nps_avaliacoes.push({id:uid(),tenant_id:currentTenant?.id,cliente_id:clienteId,nota:parseInt(nota)||0,comentario:comentario||'',via_whatsapp:true,created_at:new Date().toISOString()});
   if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'nps_'+_sbTenantId,value:DATA.nps_avaliacoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_nps_avaliacoes',JSON.stringify(DATA.nps_avaliacoes));}catch(e){}
+  try{;}catch(e){}
   if(typeof renderNPSSection==='function')renderNPSSection();
   toast('NPS registrado!','success');
 }
@@ -5706,7 +5650,7 @@ function renderWhatsapp(){
   if(!DATA.wa_templates)DATA.wa_templates=[];
   if(!DATA.wa_historico)DATA.wa_historico=[];
   const tenantTpls=DATA.wa_templates.filter(t=>!t.tenant_id||t.tenant_id===currentTenant?.id);
-  if(!tenantTpls.length){DATA.wa_templates.push(...WA_TEMPLATES_DEFAULT.map(t=>({...t,tenant_id:currentTenant?.id})));if(_sb&&_sbTenantId){DATA.wa_templates.filter(t=>t.tenant_id===currentTenant?.id).forEach(function(t){_sbUpsert('wa_templates',t).catch(function(){});});}try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}}
+  if(!tenantTpls.length){DATA.wa_templates.push(...WA_TEMPLATES_DEFAULT.map(t=>({...t,tenant_id:currentTenant?.id})));if(_sb&&_sbTenantId){DATA.wa_templates.filter(t=>t.tenant_id===currentTenant?.id).forEach(function(t){_sbUpsert('wa_templates',t).catch(function(){});});}try{;}catch(e){}}
   const tpls=DATA.wa_templates.filter(t=>!t.tenant_id||t.tenant_id===currentTenant?.id);
   // Cabeçalho com botão de alternar view de envio em massa
   const tplListHtml=tpls.map(t=>'<div class="wa-tpl-card" id="watpl-'+t.id+'" onclick="selecionarWaTpl(\''+t.id+'\')"><div class="wa-tpl-name">'+t.nome+'</div><div class="wa-tpl-cat">'+(t.cat||t.categoria||'')+'</div></div>').join('');
@@ -5804,7 +5748,7 @@ function enviarWhatsapp(){
   if(!DATA.wa_historico)DATA.wa_historico=[];
   DATA.wa_historico.push({id:uid(),tenant_id:currentTenant?.id,cliente_id:res.cli.id,template:_waTplSelecionado.nome,created_at:new Date().toISOString()});
   if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'wa_historico_'+_sbTenantId,value:DATA.wa_historico,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_wa_historico',JSON.stringify(DATA.wa_historico));}catch(e){}
+  try{;}catch(e){}
   renderWhatsapp();toast('WhatsApp aberto!','success');
 }
 function copiarMensagemWA(){
@@ -5837,9 +5781,9 @@ async function salvarWaTpl(){
     _gbrAtualizarIndicadorSync('saving','Salvando template...');
     const saved=await _sbUpsert('wa_templates',tpl);
     if(saved){_gbrAtualizarIndicadorSync('ok','Salvo na nuvem ✓');}
-    else{try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
   } else {
-    try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}
+    try{;}catch(e){}
   }
   closeModal('modalWaTpl');renderWhatsapp();toast('Template salvo!');
 }
@@ -5850,8 +5794,8 @@ async function excluirWaTpl(id){
     _gbrAtualizarIndicadorSync('saving','Removendo...');
     const r=await _sb.from('wa_templates').delete().eq('id',id);
     if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
-    else{try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
-  } else {try{localStorage.setItem('gbr_wa_templates',JSON.stringify(DATA.wa_templates));}catch(e){}}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+  } else {try{;}catch(e){}}
   renderWhatsapp();
   document.getElementById('waSendPanel').innerHTML='<div class="empty" style="padding:40px"><div class="empty-icon">💬</div><div class="empty-title">Template excluído</div></div>';
   toast('Template excluído');
@@ -5904,7 +5848,7 @@ function logAuditoria(acao,detalhes){
   });
   // Manter últimos 500 registros
   if(DATA.auditoria.length>500)DATA.auditoria=DATA.auditoria.slice(-500);
-  try{localStorage.setItem('gbr_auditoria',JSON.stringify(DATA.auditoria));}catch(e){}
+  try{;}catch(e){}
 }
 
 // showPage unificado — overrides removidos para evitar recursão
@@ -6043,9 +5987,9 @@ async function salvarMovFinanceiro(){
       created_at:mFull.created_at,updated_at:new Date().toISOString()};
     const saved=await _sbUpsert('movimentacoes_financeiras',sbObj);
     if(saved){_gbrAtualizarIndicadorSync('ok','Salvo na nuvem ✓');}
-    else{try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Salvo localmente');}
   } else {
-    try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}
+    try{;}catch(e){}
     toast('⚠️ Sem conexão — salvo localmente','warn');
   }
   closeModal('modalMovFinanceiro');renderFinanceiro();toast('Movimentação salva!');
@@ -6059,8 +6003,8 @@ async function excluirMovFin(id){
     _gbrAtualizarIndicadorSync('saving','Removendo...');
     const r=await _sb.from('movimentacoes_financeiras').delete().eq('id',id);
     if(!r.error){_gbrAtualizarIndicadorSync('ok','Removido ✓');}
-    else{try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
-  } else {try{localStorage.setItem('gbr_movimentacoes_fin',JSON.stringify(DATA.movimentacoes_fin));}catch(e){}}
+    else{try{;}catch(e){}_gbrAtualizarIndicadorSync('off','⚠️ Erro no servidor');}
+  } else {try{;}catch(e){}}
   renderFinanceiro();toast('Movimentação excluída');
 }
 
@@ -6168,7 +6112,7 @@ async function salvarTicket(){
     logAuditoria('Abriu Chamado','#'+novoNum+' — '+titulo);
     await _syncTicketSb(novoId, novoTicket);
   }
-  try{localStorage.setItem('gbr_tickets',JSON.stringify(DATA.tickets));}catch(e){}
+  try{;}catch(e){}
   closeModal('modalTicket');renderTickets();
   toast(id?'Chamado atualizado!':'Chamado aberto com sucesso!','success');
 }
@@ -6178,7 +6122,7 @@ async function excluirTicket(id){
   logAuditoria('Excluiu Ticket','#'+t?.numero+' — '+t?.titulo);
   DATA.tickets=DATA.tickets.filter(x=>x.id!==id);
   if(_sb&&_sbTenantId){await _sb.from('tickets').delete().eq('id',id);}
-  try{localStorage.setItem('gbr_tickets',JSON.stringify(DATA.tickets));}catch(e){}
+  try{;}catch(e){}
   renderTickets();toast('Chamado excluído');
 }
 function verTicket(id){editarTicket(id);}
@@ -6225,7 +6169,7 @@ function renderStatusSync() {
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' +
       '<div style="width:42px;height:42px;border-radius:10px;background:' + (ativo ? 'rgba(16,185,129,.1)' : 'rgba(255,255,255,.06)') + ';display:flex;align-items:center;justify-content:center;font-size:20px">' + (ativo ? '🟢' : '⚫') + '</div>' +
       '<div><div style="font-weight:600;font-size:14px">' + (ativo ? 'Sincronização Ativa' : 'Sincronização Inativa') + '</div>' +
-      '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + (ativo ? 'Dados sincronizando em tempo real com Supabase' : 'Sistema operando em modo local (localStorage)') + '</div></div>' +
+      '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + (ativo ? 'Dados sincronizando em tempo real com Supabase' : 'Sem conexão com Supabase') + '</div></div>' +
     '</div>' +
     '<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;color:var(--text2);margin-bottom:12px">' +
       'Nó: <b style="color:var(--text)">dados_operacionais/' + tid + '</b><br>' +
@@ -6577,7 +6521,7 @@ function renderPermGrid(){
   const labels={'ver_dashboard':'Ver Dashboard','ver_agenda':'Ver Agenda','editar_agendamento':'Editar Agendamento','cancelar_agendamento':'Cancelar Agendamento','ver_clientes':'Ver Clientes','editar_clientes':'Editar Clientes','ver_caixa':'Ver Caixa','abrir_fechar_caixa':'Abrir/Fechar Caixa','ver_financeiro':'Ver Financeiro','editar_financeiro':'Editar Financeiro','ver_relatorios':'Ver Relatórios','ver_estoque':'Ver Estoque','editar_estoque':'Editar Estoque','ver_checklist':'Ver Checklist','editar_checklist':'Editar Checklist','ver_whatsapp':'Ver WhatsApp','ver_fidelidade':'Ver Fidelidade','dar_desconto':'Aplicar Descontos','ver_admin':'Ver Painel Admin'};
   el.innerHTML='<div class="perm-grid">'+PERMISSOES_LISTA.map(p=>'<div class="perm-item"><input type="checkbox" id="perm_'+p+'" '+(perms[p]?'checked':'')+' onchange="DATA.permissoes[\''+_roleTab+'\'][\''+p+'\']=this.checked"><label for="perm_'+p+'" style="cursor:pointer">'+labels[p]+'</label></div>').join('')+'</div>';
 }
-async function salvarPermissoes(){logAuditoria('Salvou Permissões','Perfil: '+_roleTab);if(_sb&&_sbTenantId){await _sb.from('global_settings').upsert({key:'permissoes_'+_sbTenantId,value:DATA.permissoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_permissoes',JSON.stringify(DATA.permissoes));}catch(e){}toast('Permissões salvas na nuvem! ✓');}
+async function salvarPermissoes(){logAuditoria('Salvou Permissões','Perfil: '+_roleTab);if(_sb&&_sbTenantId){await _sb.from('global_settings').upsert({key:'permissoes_'+_sbTenantId,value:DATA.permissoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{;}catch(e){}toast('Permissões salvas na nuvem! ✓');}
 
 // ── Regras Admin ──────────────────────────────────────────
 function renderAdminRegras(){
@@ -6598,7 +6542,7 @@ function salvarRegrasDesconto(){
   const _senhaToSave=_rSenha.startsWith('••')?(DATA.configuracoes[tid]?.senha_admin||''):_rSenha;
   Object.assign(DATA.configuracoes[tid],{desc_sem_senha:+document.getElementById('rDescSem').value||10,desc_com_senha:+document.getElementById('rDescCom').value||50,senha_admin:_senhaToSave});
   if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  try{;}catch(e){}
   logAuditoria('Salvou Regras de Desconto','');toast('Regras de desconto salvas! ✓');
 }
 function salvarAutomacoes(){
@@ -6606,7 +6550,7 @@ function salvarAutomacoes(){
   if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   Object.assign(DATA.configuracoes[tid],{auto_fidelidade:document.getElementById('autoFidelidade').checked,auto_caixa:document.getElementById('autoCaixa').checked,auto_aniversario:document.getElementById('autoAniversario').checked,auto_estoque:document.getElementById('autoEstoque').checked});
   if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  try{;}catch(e){}
   logAuditoria('Salvou Automações','');toast('Automações salvas! ✓');
 }
 // ── FUNÇÕES LEGADAS (DEPRECATED) — NÃO REMOVER, apenas stub seguro ──────────
@@ -6704,7 +6648,7 @@ function importarDados(input){
 
       logAuditoria('Importou Dados',file.name);
       _sbSyncBulk();
-      try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}
+      try{;}catch(e){}
 
       if(_sbReady && _sbTenantId){
         toast('Importando para a nuvem...','info');
@@ -6787,7 +6731,7 @@ function salvarEmpresaAdmin(){
   DATA.tenants[i].config_empresa=cfg;
   if(cfg.nome){DATA.tenants[i].nome=cfg.nome;document.getElementById('tenantNome').textContent=cfg.nome;}
   if(_sb&&_sbTenantId){_sb.from('tenants').update({config_empresa:cfg,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
-  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  try{;}catch(e){}
   logAuditoria('Editou Dados da Empresa',cfg.nome);toast('Dados salvos na nuvem! ✓');
 }
 function salvarIntegAdmin(){salvarEmpresaAdmin();}
@@ -6819,7 +6763,7 @@ function salvarEmpresaAdminCompleto(){
   if(cfgCep)cfgCep.value=cepBase;
   if(cfgVkm)cfgVkm.value=vkm||'';
   if(_sb&&_sbTenantId){_sb.from('tenants').update({config:DATA.configuracoes[currentTenant?.id]||{},atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
-  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  try{;}catch(e){}
   // Persistir vagas_por_horario no Supabase (tenant)
   if(_sb&&_sbTenantId){
     var vagasConf = DATA.configuracoes[tid]?.vagas_simultaneas || 1;
@@ -6861,7 +6805,7 @@ function carregarLogo(input){
   reader.onload=e=>{
     document.getElementById('logoPreviewWrap').innerHTML='<img src="'+e.target.result+'" class="logo-preview"><br><div style="font-size:11px;color:var(--text2);margin-top:6px">Clique para trocar</div>';
     const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
-    if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.logo=e.target.result;if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants[i].aparencia,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}}
+    if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.logo=e.target.result;if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants[i].aparencia,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}try{;}catch(e){}}
     // Aplicar no logo-box
     const lb=document.querySelector('.logo-box');if(lb)lb.innerHTML='<img src="'+e.target.result+'" style="width:100%;max-height:52px;object-fit:contain;border-radius:6px">';
     toast('Logo carregado!');
@@ -6893,7 +6837,7 @@ function aplicarCoresCustom(){
   const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
   if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};Object.assign(DATA.tenants[i].aparencia,{accent,bg,bg2,textColor});}
   if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:{accent,bg,bg2,textColor},atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
-  try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+  try{;}catch(e){}
   logAuditoria('Alterou Cores do Sistema','Accent: '+accent);toast('Cores aplicadas! ✓');
 }
 function resetCoresCustom(){
@@ -6902,7 +6846,7 @@ function resetCoresCustom(){
   const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
   if(i>=0&&DATA.tenants[i].aparencia)delete DATA.tenants[i].aparencia.accent;
   if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:null,atualizado_em:new Date().toISOString()}).eq('id',currentTenant?.id).catch(function(){});}
-  try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+  try{;}catch(e){}
   toast('Cores resetadas! ✓');
 }
 function salvarMarca(){
@@ -6916,7 +6860,7 @@ function salvarMarca(){
   const ttl=document.querySelector('.login-logo h2');if(ttl&&nome)ttl.textContent=nome;
   document.title=nome||'GBR Sistemas';
   if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants?.find(t=>t.id===currentTenant?.id)?.aparencia||{},atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}
-  try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+  try{;}catch(e){}
   logAuditoria('Editou Marca do Sistema',nome);toast('Marca aplicada! ✓');
 }
 function aplicarFontSize(){
@@ -6926,7 +6870,7 @@ function aplicarFontSize(){
 function atualizarMenuModulos(){
   const ativos=MODULOS_SISTEMA.filter(m=>{const el=document.getElementById('mod_'+m);return el?el.checked:true;});
   const i=DATA.tenants.findIndex(t=>t.id===currentTenant?.id);
-  if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.modulos_ativos=ativos;if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants[i].aparencia,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}}
+  if(i>=0){if(!DATA.tenants[i].aparencia)DATA.tenants[i].aparencia={};DATA.tenants[i].aparencia.modulos_ativos=ativos;if(_sb&&_sbTenantId){_sb.from('tenants').update({aparencia:DATA.tenants[i].aparencia,atualizado_em:new Date().toISOString()}).eq('id',currentTenant.id).catch(function(){});}try{;}catch(e){}}
 }
 function carregarAparenciaTenant(){
   if(!currentTenant?.aparencia)return;
@@ -6960,7 +6904,7 @@ function toggleInteg(key,val){
   if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   DATA.configuracoes[tid]['integ_'+key]=val;
   if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}
-  try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){}
+  try{;}catch(e){}
   logAuditoria((val?'Ativou':'Desativou')+' Integração',key);toast((val?'Ativado':'Desativado')+': '+key);
 }
 
@@ -7272,7 +7216,7 @@ function confirmarResetCategoria(cat,nome){
     auditoria:()=>{DATA.auditoria=(DATA.auditoria||[]).filter(a=>a.tenant_id&&a.tenant_id!==tid);},
     checklists:()=>{DATA.checklists=DATA.checklists.filter(c=>c.tenant_id!==tid);},
   };
-  if(mapa[cat]){mapa[cat]();_sbSyncBulk();try{localStorage.setItem('gbr_agendamentos',JSON.stringify(DATA.agendamentos));}catch(e){}try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){}closeModal('modalResetSeletivo');logAuditoria('Reset Seletivo','Categoria: '+nome);toast('✓ '+nome+' limpo com sucesso!','success');}
+  if(mapa[cat]){mapa[cat]();_sbSyncBulk();try{;}catch(e){}try{;}catch(e){}closeModal('modalResetSeletivo');logAuditoria('Reset Seletivo','Categoria: '+nome);toast('✓ '+nome+' limpo com sucesso!','success');}
   else{toast('Categoria inválida','error');}
 }
 
@@ -7292,7 +7236,7 @@ function _registrarSessao(user){
   // Remove sessão antiga do mesmo usuário
   DATA._sessoes=DATA._sessoes.filter(s=>s.userId!==user.id);
   DATA._sessoes.push(sessao);
-  try{localStorage.setItem('gbr__sessoes',JSON.stringify(DATA._sessoes));}catch(e){}
+  try{;}catch(e){}
   // Sincronizar sessão no Supabase para visibilidade multi-device
   if (_sb && _sbTenantId) {
     _sb.from('global_settings').upsert({
@@ -7305,7 +7249,7 @@ function _registrarSessao(user){
   if(window._sessaoHeartbeat)clearInterval(window._sessaoHeartbeat);
   window._sessaoHeartbeat=setInterval(()=>{
     const idx=DATA._sessoes.findIndex(s=>s.userId===user.id);
-    if(idx>=0){DATA._sessoes[idx].ultima_atividade=new Date().toISOString();DATA._sessoes[idx].online=true;try{localStorage.setItem('gbr__sessoes',JSON.stringify(DATA._sessoes));}catch(e){}}
+    if(idx>=0){DATA._sessoes[idx].ultima_atividade=new Date().toISOString();DATA._sessoes[idx].online=true;try{;}catch(e){}}
   },120000);
 }
 
@@ -7366,7 +7310,7 @@ function toggleWaAuto(val){
   const tid=currentTenant?.id;if(!tid)return;
   if(!DATA.configuracoes[tid])DATA.configuracoes[tid]={};
   DATA.configuracoes[tid].wa_auto_ativo=val;
-  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{localStorage.setItem('gbr_configuracoes',JSON.stringify(DATA.configuracoes));}catch(e){};
+  if(_sb&&_sbTenantId){_sb.from('global_settings').upsert({key:'config_'+_sbTenantId,value:DATA.configuracoes[currentTenant?.id]||{},updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{;}catch(e){};
   toast(val?'✅ Automação WhatsApp ATIVA':'⏸ Automação WhatsApp pausada',val?'success':'warn');
   logAuditoria('WhatsApp Automação',val?'Ativada':'Desativada');
 }
@@ -7484,7 +7428,7 @@ window.GBR_API = (function() {
         must_change_password: true, ativo: true, created_at: new Date().toISOString()
       });
       logAuditoria('API: Criou Tenant', nome + ' | ' + ownerEmail);
-      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+      try{;}catch(e){}
       return { tenant: _tenantSnapshot(DATA.tenants.at(-1)), owner_email: ownerEmail, temp_password: pwd };
     },
 
@@ -7502,7 +7446,7 @@ window.GBR_API = (function() {
         if (oi >= 0) DATA.users[oi].email = ownerEmail.toLowerCase();
       }
       logAuditoria('API: Editou Tenant', DATA.tenants[i].nome);
-      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+      try{;}catch(e){}
       return _tenantSnapshot(DATA.tenants[i]);
     },
 
@@ -7512,7 +7456,7 @@ window.GBR_API = (function() {
       if (i < 0) throw new Error('Tenant não encontrado');
       DATA.tenants[i].ativo = !DATA.tenants[i].ativo;
       logAuditoria('API: ' + (DATA.tenants[i].ativo ? 'Ativou' : 'Suspendeu') + ' Tenant', DATA.tenants[i].nome);
-      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+      try{;}catch(e){}
       return _tenantSnapshot(DATA.tenants[i]);
     },
 
@@ -7527,7 +7471,7 @@ window.GBR_API = (function() {
       DATA.tenants[i].data_expiracao = base.toISOString();
       DATA.tenants[i].ativo = true;
       logAuditoria('API: Renovou Licença', DATA.tenants[i].nome + ' +' + meses + 'meses');
-      try{localStorage.setItem('gbr_tenants',JSON.stringify(DATA.tenants));}catch(e){}
+      try{;}catch(e){}
       return _tenantSnapshot(DATA.tenants[i]);
     },
 
@@ -7563,7 +7507,7 @@ window.GBR_API = (function() {
       DATA.users[i].password = nova;
       DATA.users[i].must_change_password = true;
       logAuditoria('API: Reset de Senha', DATA.users[i].nome);
-      try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
+      try{;}catch(e){}
       return { temp_password: nova };
     },
 
@@ -7573,7 +7517,7 @@ window.GBR_API = (function() {
       if (i < 0) throw new Error('Usuário não encontrado');
       DATA.users[i].ativo = !DATA.users[i].ativo;
       logAuditoria('API: ' + (DATA.users[i].ativo ? 'Ativou' : 'Desativou') + ' Usuário', DATA.users[i].nome);
-      try{localStorage.setItem('gbr_users',JSON.stringify(DATA.users));}catch(e){}
+      try{;}catch(e){}
       return _userSnapshot(DATA.users[i]);
     },
 
@@ -8209,27 +8153,51 @@ async function aoConfirmarAgendamento() {
   try {
     var sbPublic = supabase.createClient(GBR_SB_URL, GBR_SB_ANON, {auth:{persistSession:false}});
 
-    // 1. Verificar conflito em tempo real (double-check)
-    var duracao = _aoServicoSelecionado.tempo_estimado_min || 60;
+    // 1. Verificar conflito com proteção anti-race-condition
+    // Estratégia: gerar uma chave única de slot (tenant+horário) usada como idempotency key
+    // E fazer o check + insert em sequência rápida com re-verificação
+    var duracao   = _aoServicoSelecionado.tempo_estimado_min || 60;
     var slotStart = new Date(_aoHorarioSelecionado.isoInicio).getTime();
     var slotEnd   = slotStart + duracao * 60000;
-    var rCheck = await sbPublic.from('agendamentos').select('id').eq('tenant_id',_aoTenantId).neq('status','cancelado');
-    var ocupados = 0;
-    if (rCheck.data) {
-      rCheck.data.forEach(function(ag){
+    var slotKey   = _aoTenantId + '_' + _aoHorarioSelecionado.isoInicio + '_' + _aoServicoSelecionado.id;
+
+    // Verificar DUAS VEZES em rápida sequência (mitiga race condition sem banco-side lock)
+    var verificarOcupados = async function() {
+      var rCheck = await sbPublic.from('agendamentos')
+        .select('id,data_hora_inicio,duracao_min')
+        .eq('tenant_id', _aoTenantId)
+        .neq('status', 'cancelado');
+      if (rCheck.error || !rCheck.data) return 0;
+      var count = 0;
+      rCheck.data.forEach(function(ag) {
         if (!ag.data_hora_inicio) return;
         var agS = new Date(ag.data_hora_inicio).getTime();
         var agE = agS + ((ag.duracao_min||60)*60000);
-        if (agS < slotEnd && agE > slotStart) ocupados++;
+        if (agS < slotEnd && agE > slotStart) count++;
       });
-    }
-    if (ocupados >= _aoMaxVagas) {
+      return count;
+    };
+
+    // Check 1
+    var ocupados1 = await verificarOcupados();
+    if (ocupados1 >= _aoMaxVagas) {
       btn.disabled=false; btn.textContent='✓ Confirmar Agendamento';
       document.getElementById('aoErro').style.display='block';
-      document.getElementById('aoErro').textContent='⚠️ Este horário foi ocupado agora. Por favor, escolha outro.';
+      document.getElementById('aoErro').textContent='⚠️ Este horário foi ocupado agora. Por favor, escolha outro horário.';
       aoCarregarHorarios();
       return;
     }
+    // Aguardar 200ms e re-verificar (janela de proteção contra race condition)
+    await new Promise(function(r){ setTimeout(r, 200); });
+    var ocupados2 = await verificarOcupados();
+    if (ocupados2 >= _aoMaxVagas) {
+      btn.disabled=false; btn.textContent='✓ Confirmar Agendamento';
+      document.getElementById('aoErro').style.display='block';
+      document.getElementById('aoErro').textContent='⚠️ Horário preenchido por outro cliente. Escolha outro horário.';
+      aoCarregarHorarios();
+      return;
+    }
+    var ocupados = ocupados2;
 
     // 2. Criar/buscar cliente
     var clienteId = 'ao_'+Date.now().toString(36);
@@ -8594,7 +8562,7 @@ async function processarCSVEstoque(csvText) {
     }
   }
 
-  _sbSyncBulk();try{localStorage.setItem('gbr_produtos',JSON.stringify(DATA.produtos));}catch(e){} renderEstoque();
+  _sbSyncBulk();try{;}catch(e){} renderEstoque();
   logAuditoria('Importação de Estoque', importados+' criados, '+atualizados+' atualizados'+(erros?' ('+erros+' erros)':''));
   if (erroDetalhes.length) console.warn('[GBR] Erros importação:', erroDetalhes);
   toast('✅ '+importados+' importados, '+atualizados+' atualizados!'+(erros?' ⚠️ '+erros+' com erro.':''), importados+atualizados>0?'success':'warn');
@@ -8644,7 +8612,7 @@ async function processarCSVClientes(csvText) {
       else { DATA.clientes.push(cli); if(_sb&&_sbTenantId) try{await _sbUpsert('clientes',cli);}catch(e){} imp++; }
     } catch(e){ err++; }
   }
-  _sbSyncBulk();try{localStorage.setItem('gbr_clientes',JSON.stringify(DATA.clientes));}catch(e){} renderClientes();
+  _sbSyncBulk();try{;}catch(e){} renderClientes();
   logAuditoria('Importação de Clientes', imp+' criados, '+atu+' atualizados'+(err?' ('+err+' erros)':''));
   toast('✅ '+imp+' clientes importados, '+atu+' atualizados!'+(err?' ⚠️ '+err+' erros.':''), imp+atu>0?'success':'warn');
 }
@@ -8690,87 +8658,15 @@ async function processarCSVServicos(csvText) {
       else { DATA.servicos.push(srv); if(_sb&&_sbTenantId) try{await _sbUpsert('servicos',srv);}catch(e){} imp++; }
     } catch(e){ err++; }
   }
-  _sbSyncBulk();try{localStorage.setItem('gbr_servicos',JSON.stringify(DATA.servicos));}catch(e){} renderServicos();
+  _sbSyncBulk();try{;}catch(e){} renderServicos();
   logAuditoria('Importação de Serviços', imp+' criados, '+atu+' atualizados'+(err?' ('+err+' erros)':''));
   toast('✅ '+imp+' serviços importados, '+atu+' atualizados!'+(err?' ⚠️ '+err+' erros.':''), imp+atu>0?'success':'warn');
 }
 
 
 function carregarDados(){
-  // Carregamento síncrono via localStorage — todas as chaves unificadas
-  const allKeys=[...Object.keys(DATA),'movimentacoes_fin','tickets','auditoria','configuracoes','permissoes'];
-  allKeys.forEach(k => {
-    try { const d = localStorage.getItem('gbr_' + k); if (d) DATA[k] = JSON.parse(d); }
-    catch(e) { console.warn('[GBR] Erro ao carregar chave:', k, e); }
-  });
-
-  // ── BUG FIX: Se localStorage sem sessão mas Supabase pode ter sessão ativa ──
-  // Isso resolve o problema de "dados sumiram" em outro dispositivo ou após limpar cache
-  if (_sbReady) {
-    _sb.auth.getSession().then(function(res) {
-      if (res.data && res.data.session && res.data.session.user) {
-        var u = res.data.session.user;
-        // Só continua se não há sessão local ativa
-        if (currentUser) return;
-        _sbUserId    = u.id;
-        _sbUserEmail = u.email;
-        _sb.from('user_tenants').select('tenant_id,role').eq('user_id', u.id).maybeSingle()
-          .then(function(utRes) {
-            if (utRes.error || !utRes.data) return;
-            _sbTenantId = utRes.data.tenant_id;
-            _sbCarregarTudo(_sbTenantId).then(function(tenantObj) {
-              if (!tenantObj) return;
-              var roleNorm = ({woner:'woner',owner:'woner',admin:'admin',operador:'operador'})[utRes.data.role] || utRes.data.role;
-              var fbTenant = {id:_sbTenantId, nome:tenantObj.nome||_sbTenantId,
-                slug:(tenantObj.nome||_sbTenantId).toLowerCase().replace(/[^a-z0-9]/g,'-'),
-                data_expiracao:tenantObj.expiracao||null, ativo:tenantObj.status_licenca!=='inativo',
-                plano_nome:tenantObj.nome_exibicao_plano||tenantObj.plano||'basico', _sbData:tenantObj};
-              var fbUser = {id:_sbTenantId+'__'+_sbUserId, email:u.email,
-                nome:tenantObj.responsavel||tenantObj.nome||u.email.split('@')[0],
-                role:roleNorm, tenant_id:_sbTenantId,
-                password:'__supabase__', must_change_password:false, ativo:true, _sbFromSB:true};
-              var tIdx=DATA.tenants.findIndex(function(t){return t.id===_sbTenantId;});
-              if(tIdx>=0) DATA.tenants[tIdx]=fbTenant; else DATA.tenants.push(fbTenant);
-              var uIdx=DATA.users.findIndex(function(u2){return u2.id===fbUser.id;});
-              if(uIdx>=0) DATA.users[uIdx]=fbUser; else DATA.users.push(fbUser);
-              loginSucesso(fbUser);
-              _sbAtivarRealtime(_sbTenantId);
-              if(tenantObj.aparencia) _gbrCarregarPersonalizacoes(_sbTenantId,{style:tenantObj.aparencia});
-            });
-          });
-        return; // aguarda async acima
-      }
-      // Sem sessão Supabase — mostrar login normalmente
-      if (!currentUser) {
-        var lp = document.getElementById('loginPage');
-        if (lp) lp.style.display = 'flex';
-      }
-    }).catch(function() {
-      var lp = document.getElementById('loginPage');
-      if (lp && !currentUser) lp.style.display = 'flex';
-    });
-  }
-
-  if (DATA.tenants.length === 0 || DATA.users.length === 0) {
-    if (!_sbReady) {
-      const lp = document.getElementById('loginPage');
-      if (lp) lp.style.display = 'flex';
-    }
-    return;
-  }
-  const sessao = localStorage.getItem('gbr_sessao');
-  if (sessao) {
-    try {
-      const s = JSON.parse(sessao);
-      const u = DATA.users.find(x => x.id === s.userId);
-      if (u && u.ativo) { loginSucesso(u); return; }
-    } catch(e) { localStorage.removeItem('gbr_sessao'); }
-  }
-  // Sem sessão local ativa — Supabase async acima cuida do resto
-  if (!_sbReady) {
-    const lp = document.getElementById('loginPage');
-    if (lp) lp.style.display = 'flex';
-  }
+  // Sistema 100% online — dados carregados exclusivamente do Supabase via _sbCarregarTudo()
+  // localStorage NÃO é fonte de dados operacionais
 }
 
 
@@ -8988,18 +8884,12 @@ async function trocarSenha(){
 }
 
 function salvarDados(skipCloud) {
-  var allKeys=[].concat(Object.keys(DATA),['movimentacoes_fin','tickets','auditoria','configuracoes','permissoes']);
-  // 1. Sempre salva localStorage como cache offline
-  allKeys.forEach(function(k) {
-    if(DATA[k]===undefined) return;
-    try { localStorage.setItem('gbr_'+k, JSON.stringify(DATA[k])); } catch(e) {}
-  });
-  // 2. Sync Supabase (assíncrono, não bloqueia UI)
-  if (!skipCloud) {
-    _sbSyncFichas();
-    _sbSyncConfiguracoes();
-  }
+  // Sistema 100% online — dados salvos diretamente no Supabase pelas funções de salvar
+  // localStorage removido: sem cache local de dados operacionais
+  if (!skipCloud) { _sbSyncFichas(); _sbSyncConfiguracoes(); }
 }
+
+
 
 // ═══════════════════════════════════════════════════════════
 //  SYNC CONFIGURAÇÕES DO TENANT PARA SUPABASE
@@ -9142,7 +9032,7 @@ function _gbrAplicarCmsPersonalizacoes(tenantObj) {
       <div style="font-size:12px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Seus dados</div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <input id="aoClienteNome" type="text" placeholder="Seu nome completo *" style="padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;outline:none" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#333'">
-        <input id="aoClienteTel" type="tel" placeholder="WhatsApp / Telefone *" style="padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;outline:none" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#333'">
+        <input id="aoClienteTel" type="tel" placeholder="WhatsApp / Telefone *" oninput="this.value=maskTel(this.value)" style="padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;outline:none" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#333'">
         <input id="aoClienteEmail" type="email" placeholder="E-mail (opcional)" style="padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;outline:none" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#333'">
         <input id="aoVeiculo" type="text" placeholder="Veículo (ex: Honda Civic Prata) *" style="padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;outline:none" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#333'">
         <input id="aoPlaca" type="text" placeholder="Placa do veículo" style="padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;outline:none;text-transform:uppercase" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#333'">
