@@ -2132,14 +2132,19 @@ var _sbReady     = false;
     console.log('[GBR SB] ✅ Supabase inicializado. URL:', GBR_SB_URL);
     // Diagnóstico: testar conectividade com o banco imediatamente
     _sb.from('tenants').select('id').limit(1).then(function(r){
-      if (r.error) {
-        console.error('[GBR SB] ❌ Teste de conectividade FALHOU:', r.error.message, '| Código:', r.error.code);
-        if (r.error.code === '42501' || r.status === 403) {
+      // FIX DataCloneError: extrair apenas strings/números do resultado (não o objeto Response)
+      var errMsg = r.error ? (r.error.message || 'erro desconhecido') : null;
+      var errCode = r.error ? (r.error.code || r.status || '') : null;
+      if (errMsg) {
+        console.error('[GBR SB] ❌ Teste de conectividade FALHOU:', errMsg, '| Código:', errCode);
+        if (errCode === '42501' || errCode === 403 || errCode === '403') {
           console.error('[GBR SB] ❌ RLS bloqueando SELECT em "tenants". Verifique políticas RLS no Supabase.');
         }
       } else {
         console.log('[GBR SB] ✅ Conectividade OK. Banco acessível.');
       }
+    }).catch(function(e) {
+      console.error('[GBR SB] ❌ Conectividade falhou (exceção):', e && e.message ? e.message : String(e));
     });
   } catch(e) { console.error('[GBR SB] init:', e.message); }
 })();
@@ -2449,10 +2454,8 @@ async function _sbUpsert(tabela, dados) {
         toast('⚠️ Erro de tipo no banco. Execute o SQL de correção no Supabase.', 'warn'); return null;
       }
       // Qualquer outro erro
-      console.error('[GBR SB] ERRO upsert "'+tabela+'":', {
-        message: msg, code: r.error.code, details: r.error.details,
-        hint: r.error.hint, status: r.status, dados: dadosSanitizados
-      });
+      // FIX DataCloneError: extrair apenas strings (não o objeto Response completo)
+      console.error('[GBR SB] ERRO upsert "'+tabela+'": msg='+msg+' code='+r.error.code+' status='+r.status);
       _gbrAtualizarIndicadorSync('off', 'Erro: ' + (r.error.code||'?'));
       return null;
     }
@@ -2510,6 +2513,9 @@ function loginSucesso(user){
   document.getElementById('loginPage').style.display='none';
   document.getElementById('trocaSenhaPage').style.display='none';
   document.getElementById('appShell').style.display='flex';
+  // FIX TELA PRETA: remover loader quando app estiver pronto
+  var ldr = document.getElementById('gbr-loader');
+  if (ldr) { ldr.classList.add('out'); setTimeout(function(){ if(ldr.parentNode) ldr.parentNode.removeChild(ldr); }, 400); }
   document.getElementById('userName').textContent=user.nome;
 
   // Badge de role: mapeia woner/owner→Woner, admin→Admin, operador→Operador
@@ -5682,7 +5688,7 @@ function abrirViewMassa(){
   if(!clientes.length){html+='<div class="empty"><div class="empty-title">Nenhum cliente com telefone cadastrado</div></div>';}
   else{
     html+='<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)">';
-    html+=clientes.map(c=>'<label for="chkWa-'+c.id+'" style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" onclick="toggleSelMassa(\''+c.id+'\');atualizarCheckboxesMassa()"><input type="checkbox" id="chkWa-'+c.id+'" '+(+(_waSelected.has(c.id))?' checked':'')+' style="pointer-events:none"><span style="flex:1">'+c.nome_completo+'</span><span style="color:var(--text3);font-size:11px">'+c.telefone+'</span></label>').join('');
+    html+=clientes.map(c=>'<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" onclick="toggleSelMassa(\''+c.id+'\');atualizarCheckboxesMassa()"><input type="checkbox" id="chkWa-'+c.id+'" '+(+(_waSelected.has(c.id))?' checked':'')+' style="pointer-events:none"><span style="flex:1">'+c.nome_completo+'</span><span style="color:var(--text3);font-size:11px">'+c.telefone+'</span></label>').join('');
     html+='</div>';
   }
   html+='<div style="margin-top:12px"><button class="btn btn-success" onclick="enviarMassaSelecionados()">💬 Enviar para Selecionados (<span id=\"massaCountPanel\">'+_waSelected.size+'</span>)</button></div>';
@@ -6519,7 +6525,7 @@ function renderPermGrid(){
   };
   PERMISSOES_LISTA.forEach(p=>{if(perms[p]===undefined)perms[p]=defaults[_roleTab]?.includes(p)||false;});
   const labels={'ver_dashboard':'Ver Dashboard','ver_agenda':'Ver Agenda','editar_agendamento':'Editar Agendamento','cancelar_agendamento':'Cancelar Agendamento','ver_clientes':'Ver Clientes','editar_clientes':'Editar Clientes','ver_caixa':'Ver Caixa','abrir_fechar_caixa':'Abrir/Fechar Caixa','ver_financeiro':'Ver Financeiro','editar_financeiro':'Editar Financeiro','ver_relatorios':'Ver Relatórios','ver_estoque':'Ver Estoque','editar_estoque':'Editar Estoque','ver_checklist':'Ver Checklist','editar_checklist':'Editar Checklist','ver_whatsapp':'Ver WhatsApp','ver_fidelidade':'Ver Fidelidade','dar_desconto':'Aplicar Descontos','ver_admin':'Ver Painel Admin'};
-  el.innerHTML='<div class="perm-grid">'+PERMISSOES_LISTA.map(p=>'<div class="perm-item"><input type="checkbox" id="perm_'+p+'" '+(perms[p]?'checked':'')+' onchange="DATA.permissoes[\''+_roleTab+'\'][\''+p+'\']=this.checked"><label for="perm_'+p+'" style="cursor:pointer">'+labels[p]+'</label></div>').join('')+'</div>';
+  el.innerHTML='<div class="perm-grid">'+PERMISSOES_LISTA.map(p=>'<div class="perm-item"><label style="cursor:pointer;display:flex;align-items:center;gap:6px"><input type="checkbox" id="perm_'+p+'" '+(perms[p]?'checked':'')+' onchange="DATA.permissoes[\''+_roleTab+'\'][\''+p+'\']=this.checked"> '+labels[p]+'</label></div>').join('')+'</div>';
 }
 async function salvarPermissoes(){logAuditoria('Salvou Permissões','Perfil: '+_roleTab);if(_sb&&_sbTenantId){await _sb.from('global_settings').upsert({key:'permissoes_'+_sbTenantId,value:DATA.permissoes,updated_at:new Date().toISOString()},{onConflict:'key'}).catch(function(){});}try{;}catch(e){}toast('Permissões salvas na nuvem! ✓');}
 
@@ -6797,7 +6803,7 @@ function renderAdminAparencia(){
   // Módulos toggle
   const modNames={dashboard:'Dashboard',agenda:'Agenda',agendamentos:'Agendamentos',clientes:'Clientes',servicos:'Serviços',estoque:'Estoque',fichas:'Ficha Técnica',fidelidade:'Fidelidade',caixa:'Caixa',checklist:'Checklist',financeiro:'Financeiro',relatorios:'Relatórios',whatsapp:'WhatsApp',suporte:'Suporte'};
   const modAtivos=cfg.modulos_ativos||MODULOS_SISTEMA;
-  document.getElementById('modulosToggle').innerHTML=MODULOS_SISTEMA.map(m=>'<div class="switch-row"><div><div class="switch-label">'+(modNames[m]||m)+'</div></div><label for="mod_'+m+'" class="switch"><input type="checkbox" id="mod_'+m+'" '+(modAtivos.includes(m)?'checked':'')+' onchange="atualizarMenuModulos()"><span class="switch-slider"></span></label></div>').join('');
+  document.getElementById('modulosToggle').innerHTML=MODULOS_SISTEMA.map(m=>'<div class="switch-row"><div><div class="switch-label">'+(modNames[m]||m)+'</div></div><label class="switch"><input type="checkbox" id="mod_'+m+'" '+(modAtivos.includes(m)?'checked':'')+' onchange="atualizarMenuModulos()"><span class="switch-slider"></span></label></div>').join('');
 }
 function carregarLogo(input){
   const file=input.files[0];if(!file)return;
@@ -6982,10 +6988,10 @@ async function renderAgendaOnline(){
   document.getElementById('aoLink').value=link;
   document.getElementById('aoAtivo').checked=cfg.ao_ativo!==false;
   const horarios=cfg.ao_horarios||DIAS_SEMANA.map((d,i)=>({dia:i,nome:d,ativo:i<5,inicio:'08:00',fim:'18:00'}));
-  document.getElementById('aoHorarios').innerHTML=horarios.map((h,i)=>'<div class="online-slot"><div style="display:flex;align-items:center;gap:8px"><label for="aodia_'+i+'" class="switch" style="transform:scale(0.85)"><input type="checkbox" id="aodia_'+i+'" '+(h.ativo?'checked':'')+' ><span class="switch-slider"></span></label><span style="font-size:13px;min-width:70px">'+h.nome+'</span></div><div style="display:flex;gap:8px;align-items:center"><input type="time" value="'+h.inicio+'" id="aoinicio_'+i+'" style="width:90px;font-size:12px"> às <input type="time" value="'+h.fim+'" id="aofim_'+i+'" style="width:90px;font-size:12px"></div></div>').join('');
+  document.getElementById('aoHorarios').innerHTML=horarios.map((h,i)=>'<div class="online-slot"><div style="display:flex;align-items:center;gap:8px"><label class="switch" style="transform:scale(0.85)"><input type="checkbox" id="aodia_'+i+'" '+(h.ativo?'checked':'')+' ><span class="switch-slider"></span></label><span style="font-size:13px;min-width:70px">'+h.nome+'</span></div><div style="display:flex;gap:8px;align-items:center"><input type="time" value="'+h.inicio+'" id="aoinicio_'+i+'" style="width:90px;font-size:12px"> às <input type="time" value="'+h.fim+'" id="aofim_'+i+'" style="width:90px;font-size:12px"></div></div>').join('');
   const servs=DATA.servicos.filter(s=>s.tenant_id===currentTenant.id&&s.ativo);
   const servOnline=cfg.ao_servicos||servs.map(s=>s.id);
-  document.getElementById('aoServicos').innerHTML=servs.map(s=>'<div class="online-slot"><div style="display:flex;align-items:center;gap:8px"><label for="aoserv_'+s.id+'" class="switch" style="transform:scale(0.85)"><input type="checkbox" id="aoserv_'+s.id+'" '+(servOnline.includes(s.id)?'checked':'')+' ><span class="switch-slider"></span></label><span style="font-size:13px">'+s.nome+'</span></div><span style="font-size:12px;color:var(--accent)">'+fmtMoney(s.preco_base)+'</span></div>').join('');
+  document.getElementById('aoServicos').innerHTML=servs.map(s=>'<div class="online-slot"><div style="display:flex;align-items:center;gap:8px"><label class="switch" style="transform:scale(0.85)"><input type="checkbox" id="aoserv_'+s.id+'" '+(servOnline.includes(s.id)?'checked':'')+' ><span class="switch-slider"></span></label><span style="font-size:13px">'+s.nome+'</span></div><span style="font-size:12px;color:var(--accent)">'+fmtMoney(s.preco_base)+'</span></div>').join('');
 }
 
 async function gerarNovoTokenOnline(){
@@ -7580,10 +7586,19 @@ window.GBR_API = (function() {
     _notifyConsole(event, payload) {
       // Avisa o console externo (se houver) via postMessage
       try {
-        const msg = { gbr: true, event, payload: payload || null, ts: new Date().toISOString() };
+        // FIX DataCloneError: sanitizar payload para garantir serialização segura
+        var safePayload = payload ? JSON.parse(JSON.stringify(payload)) : null;
+        const msg = { gbr: true, event, payload: safePayload, ts: new Date().toISOString() };
         if (window.opener && !window.opener.closed) window.opener.postMessage(msg, '*');
         window.parent?.postMessage(msg, '*');
-      } catch(e) {}
+      } catch(e) {
+        // Fallback: enviar sem payload se houver erro de serialização
+        try {
+          const msg = { gbr: true, event, payload: null, ts: new Date().toISOString() };
+          if (window.opener && !window.opener.closed) window.opener.postMessage(msg, '*');
+          window.parent?.postMessage(msg, '*');
+        } catch(e2) {}
+      }
     }
   };
 
@@ -7647,8 +7662,14 @@ window.GBR_API = (function() {
 
     function reply(ok, data, error) {
       try {
-        evt.source?.postMessage({ gbr: true, response: true, action, reqId, ok, data: data||null, error: error||null }, evt.origin || '*');
-      } catch(e) {}
+        // FIX DataCloneError: garantir que data é JSON-serializável antes de postMessage
+        var safeData = data ? JSON.parse(JSON.stringify(data)) : null;
+        var safeError = error ? String(error) : null;
+        evt.source?.postMessage({ gbr: true, response: true, action, reqId, ok, data: safeData, error: safeError }, evt.origin || '*');
+      } catch(e) {
+        // Se ainda falhar, enviar apenas o status
+        try { evt.source?.postMessage({ gbr: true, response: true, action, reqId, ok, data: null, error: 'Serialization error' }, evt.origin || '*'); } catch(e2) {}
+      }
     }
 
     // Verifica token (só exigido se superadmin já logado)
@@ -7847,30 +7868,43 @@ let _waTplSelecionado=null;
     }
   }, 5000);
 
+  // FIX TELA PRETA: aguardar até que loginSucesso ou login page sejam exibidos
+  // Não esconder o loader prematuramente - ele fica até o app estar pronto
   setTimeout(async () => {
     clearTimeout(loaderTimeout);
-    const l = document.getElementById('gbr-loader');
-    if (l) { l.classList.add('out'); setTimeout(() => l.remove(), 500); }
-    
-    // Se não há sessão ativa → mostrar tela de login
     if (!_sbTenantId) {
+      // Verificar se há sessão ativa
       try {
         var sessionCheck = _sbReady
           ? await _sb.auth.getSession()
           : { data: { session: null } };
-        var session = sessionCheck.data && sessionCheck.data.session;
-        if (!session) {
-          // Sem sessão → mostrar loginPage
+        var hasSession = sessionCheck.data && sessionCheck.data.session && sessionCheck.data.session.user;
+        if (!hasSession) {
+          // Sem sessão → mostrar login e remover loader
           const lp = document.getElementById('loginPage');
           if (lp) lp.style.display = 'flex';
-          const ap = document.getElementById('appShell');
-          if (ap) ap.style.display = 'none';
+          const l2 = document.getElementById('gbr-loader');
+          if (l2) { l2.classList.add('out'); setTimeout(() => l2.remove(), 400); }
+        } else {
+          // Tem sessão mas onAuthStateChange ainda carregando → manter loader
+          // Atualizar mensagem do loader para feedback
+          const ldSub = document.querySelector('#gbr-loader .ld-sub');
+          if (ldSub) ldSub.textContent = 'Carregando seus dados...';
+          // Timeout de segurança: se demorar > 8s total, forçar exibição do login
+          setTimeout(function() {
+            if (!_sbTenantId) {
+              const lp = document.getElementById('loginPage');
+              if (lp) lp.style.display = 'flex';
+              const l3 = document.getElementById('gbr-loader');
+              if (l3) { l3.classList.add('out'); setTimeout(() => l3.remove(), 400); }
+            }
+          }, 7000);
         }
-        // Com sessão → onAuthStateChange vai lidar com SIGNED_IN
       } catch(e) {
-        // Fallback: mostrar login
         const lp = document.getElementById('loginPage');
         if (lp) lp.style.display = 'flex';
+        const l4 = document.getElementById('gbr-loader');
+        if (l4) { l4.classList.add('out'); setTimeout(() => l4.remove(), 400); }
       }
     }
   }, 800);
