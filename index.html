@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- GBR v10 build:1777560361 -->
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -2809,7 +2810,14 @@ async function fazerLogin() {
     }
     _sbTenantId = utRes.data.tenant_id;
     var tenantObj = await _sbCarregarTudo(_sbTenantId);
-    if (!tenantObj) return;
+    if (!tenantObj) {
+          // FIX: remover loader e mostrar login quando tenant não carrega
+          var _ldrFix = document.getElementById('gbr-loader');
+          if (_ldrFix) { _ldrFix.classList.add('out'); setTimeout(function(){ if(_ldrFix.parentNode)_ldrFix.parentNode.removeChild(_ldrFix); },400); }
+          var _lpFix = document.getElementById('loginPage');
+          if (_lpFix && _lpFix.style.display !== 'flex') _lpFix.style.display = 'flex';
+          return;
+        }
 
     var roleNorm = ({woner:'woner',owner:'woner',admin:'admin',operador:'operador'})[utRes.data.role] || utRes.data.role;
     var fbTenant = {
@@ -7617,7 +7625,14 @@ window.GBR_API = (function() {
             _sbUserEmail = sess.data.session.user.email;
           }
           var tenantObj = await _sbCarregarTudo(tid);
-          if (!tenantObj) return;
+          if (!tenantObj) {
+          // FIX: remover loader e mostrar login quando tenant não carrega
+          var _ldrFix = document.getElementById('gbr-loader');
+          if (_ldrFix) { _ldrFix.classList.add('out'); setTimeout(function(){ if(_ldrFix.parentNode)_ldrFix.parentNode.removeChild(_ldrFix); },400); }
+          var _lpFix = document.getElementById('loginPage');
+          if (_lpFix && _lpFix.style.display !== 'flex') _lpFix.style.display = 'flex';
+          return;
+        }
           _sbTenantId = tid;
           var fbTenant = {id:tid, nome:tenantObj.nome||tid,
             slug:(tenantObj.nome||tid).toLowerCase().replace(/[^a-z0-9]/g,'-'),
@@ -7759,7 +7774,14 @@ function acessarComoTenant(tid) { GBR_API.switchTenant(tid); }
         }
         _sbTenantId = utRes.data.tenant_id;
         var tenantObj = await _sbCarregarTudo(_sbTenantId);
-        if (!tenantObj) return;
+        if (!tenantObj) {
+          // FIX: remover loader e mostrar login quando tenant não carrega
+          var _ldrFix = document.getElementById('gbr-loader');
+          if (_ldrFix) { _ldrFix.classList.add('out'); setTimeout(function(){ if(_ldrFix.parentNode)_ldrFix.parentNode.removeChild(_ldrFix); },400); }
+          var _lpFix = document.getElementById('loginPage');
+          if (_lpFix && _lpFix.style.display !== 'flex') _lpFix.style.display = 'flex';
+          return;
+        }
         var roleNorm = ({woner:'woner',owner:'woner',admin:'admin',operador:'operador'})[utRes.data.role]||utRes.data.role;
         var fbTenant = {id:_sbTenantId, nome:tenantObj.nome||_sbTenantId,
           slug:(tenantObj.nome||_sbTenantId).toLowerCase().replace(/[^a-z0-9]/g,'-'),
@@ -9039,7 +9061,14 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 function _gbrAplicarCmsPersonalizacoes(tenantObj) {
-  if (!tenantObj) return;
+  if (!tenantObj) {
+          // FIX: remover loader e mostrar login quando tenant não carrega
+          var _ldrFix = document.getElementById('gbr-loader');
+          if (_ldrFix) { _ldrFix.classList.add('out'); setTimeout(function(){ if(_ldrFix.parentNode)_ldrFix.parentNode.removeChild(_ldrFix); },400); }
+          var _lpFix = document.getElementById('loginPage');
+          if (_lpFix && _lpFix.style.display !== 'flex') _lpFix.style.display = 'flex';
+          return;
+        }
   if (tenantObj.cms_css) {
     var styleEl = document.getElementById('_gbr_cms_css') || document.createElement('style');
     styleEl.id = '_gbr_cms_css'; styleEl.textContent = tenantObj.cms_css;
