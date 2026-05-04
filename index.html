@@ -4246,11 +4246,11 @@ function renderFichaEditor(){
   // Mão de Obra
   html += '<div class="card"><div class="card-header"><div class="card-title">Mão de Obra</div></div>'+
     '<div class="form-row-3">'+
-    '<div class="form-group"><label for="fichaVlHora">Valor da Hora (R$)</label>'+
+    '<div class="form-group"><label>Valor da Hora (R$)</label>'+
     '<input type="number" id="fichaVlHora" value="'+(valorHora||0)+'" min="0" step="0.50" placeholder="25.00" '+
     'oninput="_fichaAtual.valor_hora_manual=+this.value;_servAtual.valor_hora=+this.value;_recalcFichaSummary();_sbSyncFichas()">'+
     '<div style="font-size:10px;color:var(--text2);margin-top:2px">Ou edite direto no cadastro do serviço</div></div>'+
-    '<div class="form-group"><label for="maoObraCalc">Tempo do serviço (min)</label>'+
+    '<div class="form-group"><label>Tempo do serviço (min)</label>'+
     '<input type="number" value="'+tempoMin+'" min="1" step="5" readonly style="background:var(--bg3);color:var(--text2)">'+
     '<div style="font-size:10px;color:var(--text2);margin-top:2px">Definido no cadastro do serviço</div></div>'+
     '<div class="form-group"><label>Custo calculado</label>'+
@@ -4261,10 +4261,10 @@ function renderFichaEditor(){
   // Outros custos
   html += '<div class="card"><div class="card-header"><div class="card-title">Outros Custos</div></div>'+
     '<div class="form-row-3">'+
-    '<div class="form-group"><label for="fichaDesgasteVal">Desgaste de equipamentos (R$)</label>'+
+    '<div class="form-group"><label>Desgaste de equipamentos (R$)</label>'+
     '<input type="number" id="fichaDesgasteVal" value="'+(custoDesg||0)+'" min="0" step="0.01" '+
     'oninput="_fichaAtual.custo_desgaste=+this.value;_recalcFichaSummary();_sbSyncFichas()"></div>'+
-    '<div class="form-group"><label for="fichaFixoPct">Custo fixo (% sobre preço) <span style="font-size:10px;color:var(--text2)">aluguel+luz÷serviços/mês</span></label>'+
+    '<div class="form-group"><label>Custo fixo (% sobre preço) <span style="font-size:10px;color:var(--text2)">aluguel+luz÷serviços/mês</span></label>'+
     '<div style="display:flex;align-items:center;gap:6px">'+
     '<input type="number" id="fichaFixoPct" value="'+custoFixoPct+'" min="0" max="100" step="0.1" style="flex:1" '+
     'oninput="_fichaAtual.custo_fixo_pct=+this.value;_fichaAtual.custo_fixo=(_servAtual.preco_base*(+this.value/100));_recalcFichaSummary();_sbSyncFichas()">'+
@@ -5722,10 +5722,10 @@ function selecionarWaTpl(id){
   document.getElementById('waSendPanel').innerHTML='<div style="padding:20px">'+
     '<div style="font-size:15px;font-weight:600;margin-bottom:6px">'+tpl.nome+'</div>'+
     '<span class="badge badge-blue" style="margin-bottom:14px;display:inline-block">'+tpl.cat+'</span>'+
-    '<div class="form-group" style="margin-top:12px"><label for="waCliente">Selecionar cliente <span class="req">*</span></label><select id="waCliente" onchange="previewWaMensagem()"><option value="">— Selecione —</option>'+clientes.map(c=>'<option value="'+c.id+'">'+c.nome_completo+(c.telefone?' · '+c.telefone:'')+'</option>').join('')+'</select></div>'+
-    (agFut.length?'<div class="form-group"><label for="waAgend">Agendamento (opcional)</label><select id="waAgend" onchange="previewWaMensagem()"><option value="">— Nenhum —</option>'+agFut.map(a=>{const cl=DATA.clientes.find(c=>c.id===a.cliente_id);const sv=DATA.servicos.find(s=>s.id===a.servico_id);return'<option value="'+a.id+'">'+(cl?.nome_completo||'?')+' · '+(sv?.nome||'?')+' · '+fmtDate(a.data_hora_inicio)+'</option>';}).join('')+'</select></div>':'')+
+    '<div class="form-group" style="margin-top:12px"><label>Selecionar cliente <span class="req">*</span></label><select id="waCliente" onchange="previewWaMensagem()"><option value="">— Selecione —</option>'+clientes.map(c=>'<option value="'+c.id+'">'+c.nome_completo+(c.telefone?' · '+c.telefone:'')+'</option>').join('')+'</select></div>'+
+    (agFut.length?'<div class="form-group"><label>Agendamento (opcional)</label><select id="waAgend" onchange="previewWaMensagem()"><option value="">— Nenhum —</option>'+agFut.map(a=>{const cl=DATA.clientes.find(c=>c.id===a.cliente_id);const sv=DATA.servicos.find(s=>s.id===a.servico_id);return'<option value="'+a.id+'">'+(cl?.nome_completo||'?')+' · '+(sv?.nome||'?')+' · '+fmtDate(a.data_hora_inicio)+'</option>';}).join('')+'</select></div>':'')+
 
-    '<div class="form-group"><label for="waPreview">Preview</label><div class="wa-preview" id="waPreview" style="color:var(--text2)">Selecione o cliente para ver o preview...</div></div>'+
+    '<div class="form-group"><label>Preview</label><div class="wa-preview" id="waPreview" style="color:var(--text2)">Selecione o cliente para ver o preview...</div></div>'+
     '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-success" onclick="enviarWhatsapp()">💬 Abrir WhatsApp</button><button class="btn btn-secondary" onclick="copiarMensagemWA()">📋 Copiar</button><button class="btn btn-ghost btn-sm" onclick="editarWaTpl(\''+id+'\')">✏ Editar</button><button class="btn btn-danger btn-sm" onclick="excluirWaTpl(\''+id+'\')">🗑</button></div>'+
   '</div>';
 }
@@ -7830,7 +7830,7 @@ let _waTplSelecionado=null;
 (async function init(){
 
   // ── Núcleo: se qualquer coisa aqui falhar, o loader já mostra o botão de reload ──
-  try { carregarDados(); } catch(e) { console.error('[GBR] carregarDados falhou:', e); }
+  // carregarDados: sistema 100% online, dados vêm do Supabase via onAuthStateChange
 
   // ── Aparência (antes de qualquer render para evitar flash) ──
   try {
