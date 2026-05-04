@@ -2326,7 +2326,7 @@ function _gbrAtivarPolling(tenantId) {
       var atualizado = false;
       for (var i = 0; i < tabelas.length; i++) {
         var cfg = tabelas[i];
-        var r = await _sb.from(cfg[0]).select('*').filter('tenant_id::text','eq',String(tenantId)).limit(500);
+        var r = await _sb.from(cfg[0]).select('*').eq('tenant_id', tenantId).limit(500);
         if (!r.error && r.data && r.data.length > 0) {
           // SUBSTITUIR completamente (não merge) para evitar duplicatas
           var antes = JSON.stringify(DATA[cfg[1]]);
@@ -2613,20 +2613,20 @@ async function _sbCarregarTudo(tenantId) {
       // Helper para query com tenant_id como TEXT (evita erro "text = uuid")
       function _eqTid(q, tid) {
         // Tenta cast explícito para suportar tenant_id como UUID ou TEXT
-        return q.or('tenant_id.eq.' + tid + ',tenant_id::text.eq.' + tid);
+        return q.eq('tenant_id', tid);
       }
       var [rCli, rAg, rSrv, rProd, rRegras, rCaixas, rMovFin, rChk, rWaTpl] = await Promise.all([
-        // FIX4: usar .filter('tenant_id::text','eq',tenantId) para suportar
+        // FIX4: usar .eq('tenant_id', tenantId) para suportar
         // tenant_id como UUID no banco mas valor TEXT 'gbr_xxx' vindo do sistema
-        _qry('clientes',    _sb.from('clientes').select('*').filter('tenant_id::text','eq',tenantId).eq('ativo', true)),
-        _qry('agendamentos',_sb.from('agendamentos').select('*').filter('tenant_id::text','eq',tenantId).neq('status','cancelado').limit(500)),
-        _qry('servicos',    _sb.from('servicos').select('*').filter('tenant_id::text','eq',tenantId).eq('ativo', true)),
-        _qry('produtos',    _sb.from('produtos').select('*').filter('tenant_id::text','eq',tenantId).eq('ativo', true)),
-        _qry('regras_fid',  _sb.from('regras_fidelidade').select('*').filter('tenant_id::text','eq',tenantId).eq('ativo', true)),
-        _qry('caixas',      _sb.from('caixas').select('*').filter('tenant_id::text','eq',tenantId).limit(100)),
-        _qry('mov_fin',     _sb.from('movimentacoes_financeiras').select('*').filter('tenant_id::text','eq',tenantId).limit(500)),
-        _qry('checklists',  _sb.from('checklists').select('*').filter('tenant_id::text','eq',tenantId).limit(200)),
-        _qry('wa_templates',_sb.from('wa_templates').select('*').filter('tenant_id::text','eq',tenantId))
+        _qry('clientes',    _sb.from('clientes').select('*').eq('tenant_id', tenantId).eq('ativo', true)),
+        _qry('agendamentos',_sb.from('agendamentos').select('*').eq('tenant_id', tenantId).neq('status','cancelado').limit(500)),
+        _qry('servicos',    _sb.from('servicos').select('*').eq('tenant_id', tenantId).eq('ativo', true)),
+        _qry('produtos',    _sb.from('produtos').select('*').eq('tenant_id', tenantId).eq('ativo', true)),
+        _qry('regras_fid',  _sb.from('regras_fidelidade').select('*').eq('tenant_id', tenantId).eq('ativo', true)),
+        _qry('caixas',      _sb.from('caixas').select('*').eq('tenant_id', tenantId).limit(100)),
+        _qry('mov_fin',     _sb.from('movimentacoes_financeiras').select('*').eq('tenant_id', tenantId).limit(500)),
+        _qry('checklists',  _sb.from('checklists').select('*').eq('tenant_id', tenantId).limit(200)),
+        _qry('wa_templates',_sb.from('wa_templates').select('*').eq('tenant_id', tenantId))
       ]);
 
       // Aplicar resultados — ignorar erros 404/403 (tabela não existe ainda)
@@ -2653,7 +2653,7 @@ async function _sbCarregarTudo(tenantId) {
       try {
         var rColabs = await _sb.from('user_tenants')
           .select('user_id,role,email_cache,nome,ativo,criado_em')
-          .filter('tenant_id::text','eq',tenantId);
+          .eq('tenant_id', tenantId);
         // FIX: sem .eq('ativo',true) — usa filter cast para tenant_id TEXT vs UUID
         if (!rColabs.error && rColabs.data) {
           rColabs.data.forEach(function(ut) {
@@ -2688,7 +2688,7 @@ async function _sbCarregarTudo(tenantId) {
 
       // Carregar movimentações de caixa (tabela pode não existir)
       try {
-        var rMovCx = await _sb.from('movimentacoes').select('*').filter('tenant_id::text','eq',tenantId).order('created_at',{ascending:false}).limit(500);
+        var rMovCx = await _sb.from('movimentacoes').select('*').eq('tenant_id', tenantId).order('created_at',{ascending:false}).limit(500);
         if (!rMovCx.error && rMovCx.data !== null) DATA.movimentacoes = rMovCx.data;
         // Ignorar 404/403 silenciosamente
       } catch(eMovCx) { /* tabela não existe ainda */ }
@@ -5037,8 +5037,8 @@ async function diagnosticarConexao() {
         var t0 = Date.now();
         var q;
         if (tb==='global_settings') q = _sb.from(tb).select('key').limit(1);
-        else if (tb==='user_tenants') q = _sb.from(tb).select('user_id').filter('tenant_id::text','eq',_sbTenantId).limit(1);
-        else q = _sb.from(tb).select('id').filter('tenant_id::text','eq',_sbTenantId).limit(1);
+        else if (tb==='user_tenants') q = _sb.from(tb).select('user_id').eq('tenant_id',_sbTenantId).limit(1);
+        else q = _sb.from(tb).select('id').eq('tenant_id', _sbTenantId).limit(1);
         return q.then(function(r){ return {tt:tt, r:r, ms:Date.now()-t0}; }).catch(function(e){ return {tt:tt, r:{error:{message:e.message}}, ms:0}; });
       });
 
@@ -6245,12 +6245,12 @@ async function _sbCarregarColaboradores() {
     // FIX: sem .eq('ativo',true) — coluna pode não existir no schema atual
     var r = await _sb.from('user_tenants')
       .select('user_id,role,email_cache,nome,ativo,criado_em')
-      .filter('tenant_id::text','eq',_sbTenantId);
+      .eq('tenant_id', _sbTenantId);
     if (r.error) {
       // Tentar com menos campos se colunas opcionais não existirem
       r = await _sb.from('user_tenants')
         .select('user_id,role,email_cache')
-        .filter('tenant_id::text','eq',_sbTenantId);
+        .eq('tenant_id', _sbTenantId);
     }
     if (r.error || !r.data) return;
     r.data.forEach(function(ut) {
@@ -6284,7 +6284,7 @@ async function renderAdminAcessos(){
     try {
       var r = await _sb.from('user_tenants')
         .select('user_id, role, email_cache, nome, ativo, criado_em')
-        .filter('tenant_id::text','eq',String(_sbTenantId));
+        .eq('tenant_id', _sbTenantId);
       if(!r.error && r.data){
         colaboradores = r.data.map(function(ut){
           return {
@@ -6405,7 +6405,7 @@ async function salvarUsuarioAdmin(){
       var r = await _sb.from('user_tenants')
         .update({role:role, nome:nome, ativo:ativo})
         .eq('user_id::text', userId)
-        .eq('tenant_id::text', String(_sbTenantId));
+        .eq('tenant_id', _sbTenantId);
       if(r.error) throw new Error(r.error.message);
       // Atualizar DATA.users local
       var idx=DATA.users.findIndex(function(u){return u._sbUserId===userId||u.id===userId;});
@@ -6418,7 +6418,7 @@ async function salvarUsuarioAdmin(){
       var maxColab=window._gbrMaxColaboradores||999;
       var rCount=await _sb.from('user_tenants')
         .select('user_id',{count:'exact'})
-        .filter('tenant_id::text','eq',String(_sbTenantId))
+        .eq('tenant_id', _sbTenantId)
         .neq('role','woner').neq('role','owner').eq('ativo',true);
       var countAtual=(rCount.count||0);
       if(countAtual>=maxColab){
@@ -6503,7 +6503,7 @@ async function toggleUserAdmin(userId){
   if(_sb&&_sbTenantId){
     var r=await _sb.from('user_tenants').update({ativo:novoAtivo})
       .filter('user_id::text','eq',String(userId))
-      .filter('tenant_id::text','eq',String(_sbTenantId));
+      .eq('tenant_id', _sbTenantId);
     if(r.error){toast('Erro: '+r.error.message,'error');return;}
   }
   var idx=DATA.users.findIndex(function(u){return u._sbUserId===userId||u.id===userId;});
